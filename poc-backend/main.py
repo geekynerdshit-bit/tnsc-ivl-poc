@@ -14,14 +14,6 @@ app = FastAPI(
     version="1.0.0",
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
@@ -44,6 +36,16 @@ async def log_requests(request: Request, call_next):
     )
     return response
 
+
+# CORS must be added AFTER log_requests so it wraps the outermost layer
+# and all responses (including error JSONResponses) carry Access-Control-Allow-Origin
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.include_router(consoles.router, prefix="/api")
 app.include_router(scans.router, prefix="/api")

@@ -25,22 +25,31 @@ Goal: Demo geo-verified NFC console tracking to Nishant
 ---
 
 ## Stage 2 — React Frontend
-**Status: NOT STARTED — waiting for Stage 1 sign-off**
+**Status: IN PROGRESS**
 
-- [ ] Scaffold React + Vite project (`poc-frontend/`)
-- [ ] `/scan` page
-  - [ ] Read `?tag=IVL-001` from URL param
-  - [ ] Capture GPS via Browser Geolocation API
-  - [ ] `POST /api/scan` with console_id + coordinates
-  - [ ] Show result card: VERIFIED (green) / OUTSIDE_ZONE (red)
-  - [ ] Show console name, hospital, distance, timestamp
-- [ ] `/dashboard` page
-  - [ ] Summary cards from `GET /api/stats`
-  - [ ] Leaflet map (OpenStreetMap) with scan pins
-  - [ ] Pins coloured green (VERIFIED) / red (OUTSIDE_ZONE)
-  - [ ] Table of recent scans from `GET /api/scans`
-- [ ] Wire `VITE_API_URL` env var pointing to backend
-- [ ] Deploy to Vercel
+### Wave 0 — Scaffold
+- [x] Backend updated: ScanRequest lat/lng Optional, NO_GPS geo_status
+- [x] CLAUDE.md updated with frontend section
+- [x] Scaffold React + Vite project (`poc-frontend/`)
+- [x] Install: react-router-dom, axios, leaflet, react-leaflet
+- [x] `src/main.jsx` — BrowserRouter + Leaflet CSS import
+- [x] `src/App.jsx` — routes wired
+- [x] `src/api/client.js` — all API functions
+- [x] `src/components/NavBar.jsx`
+- [x] `src/components/LoadingSpinner.jsx`
+- [x] Stub files for all pages and components
+- [x] `npm run dev` starts clean on port 3000
+
+### Wave 1 — Pages (parallel)
+- [ ] ScanPage.jsx + ScanResult.jsx — SCAN PAGE AGENT
+- [ ] DashboardPage.jsx + StatsCards.jsx + ScanTable.jsx — DASHBOARD AGENT
+- [ ] ConsoleMap.jsx — MAP AGENT
+
+### Wave 2 — Integration
+- [x] ConsoleMap wired into DashboardPage
+- [x] Build passes clean (138 modules, 0 errors)
+- [x] Dev server starts (194ms, http://localhost:3000)
+- [x] STAGE2_COMPLETE.md written
 
 ---
 

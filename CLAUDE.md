@@ -141,5 +141,82 @@ YYYY-MM-DD HH:MM:SS.mmm | LEVEL    | logger_name | message
 ## Deployment (when ready)
 
 - **Backend → Render:** connect repo, set env vars, start command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-- **Frontend → Vercel:** connect repo, set `VITE_API_URL` to Render URL
+- **Frontend → Vercel:** connect repo, set `VITE_API_BASE_URL` to Render URL
 - **UptimeRobot:** ping `GET /health` every 5 min to keep Render free tier warm
+
+---
+
+## Frontend (Stage 2)
+
+- **Framework:** React 18 + Vite
+- **Routing:** React Router v6
+- **HTTP:** Axios (all calls in `src/api/client.js` only — no `fetch()` elsewhere)
+- **Map:** react-leaflet + leaflet (OpenStreetMap, no Mapbox, no API key)
+- **Styling:** Plain CSS in `app.css` — no Tailwind, no CSS frameworks
+- **Env var:** `VITE_API_BASE_URL` (never hardcoded)
+- **Mobile-first** on ScanPage, **desktop-first** on DashboardPage
+- Min font 16px on ScanPage, min button height 48px on ScanPage
+- **Color scheme:** Navy `#0A1628`, Teal `#00BFA5`, White `#FFFFFF`
+
+### Frontend structure
+
+```
+poc-frontend/
+├── index.html
+├── vite.config.js
+├── package.json
+├── .env.example
+├── .env.local
+└── src/
+    ├── main.jsx           ← BrowserRouter, Leaflet CSS import
+    ├── App.jsx            ← Routes: / and /scan → ScanPage, /dashboard → DashboardPage
+    ├── app.css            ← resets + global styles
+    ├── api/
+    │   └── client.js      ← ALL axios calls live here
+    ├── pages/
+    │   ├── ScanPage.jsx   ← NFC tag flow: URL param → GPS → submit → result
+    │   └── DashboardPage.jsx ← stats + map + scan table, auto-refresh 30s
+    └── components/
+        ├── NavBar.jsx
+        ├── StatsCards.jsx     ← GET /api/stats, 4 summary cards
+        ├── ConsoleMap.jsx     ← Leaflet map, console pins + scan markers
+        ├── ScanTable.jsx      ← GET /api/scans, recent scans table
+        ├── ScanResult.jsx     ← Result card after POST /api/scan
+        └── LoadingSpinner.jsx
+```
+
+### Frontend commands
+
+```bash
+cd poc-frontend
+npm install
+npm run dev     # port 3000
+npm run build
+```
+
+### Key rules
+
+- Never hardcode API URL — always use `import.meta.env.VITE_API_BASE_URL`
+- Every data-fetching component handles 3 states: loading / success / error
+- All API errors caught and shown to user — no silent failures
+- `leaflet/dist/leaflet.css` must be imported in `main.jsx` or map breaks
+
+### API field reference (exact names from schemas.py)
+
+**ConsoleResponse:** `id, name, hospital, city, pincode, approved_lat, approved_lng, radius_m, status`
+
+**ScanRequest (POST body):** `console_id, scanned_lat (Optional), scanned_lng (Optional), scanned_by, device_info`
+
+**ScanResponse:** `scan_id, console_id, console_name, hospital, city, scanned_at, scanned_lat, scanned_lng, distance_m, geo_status, scanned_by`
+- `geo_status` values: `VERIFIED` | `OUTSIDE_ZONE` | `NO_GPS`
+- `scanned_lat`, `scanned_lng`, `distance_m` are Optional (null when GPS denied)
+- `distance_readable` does NOT exist — format from `distance_m` in the frontend
+
+**ScanListItem:** `id, console_id, console_name, hospital, city, scanned_at, scanned_lat, scanned_lng, distance_m, geo_status, scanned_by, device_info`
+
+**StatsResponse:** `total_consoles, total_scans, verified_scans, outside_zone_scans, consoles_scanned_today, last_scan_at`
+
+### Scan page tag IDs for testing
+
+Use `IVL-001` through `IVL-010` — these match the seeded consoles.
+Example test URL: `http://localhost:3000/scan?tag=IVL-001`

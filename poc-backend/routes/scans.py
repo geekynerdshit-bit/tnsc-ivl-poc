@@ -26,14 +26,19 @@ def submit_scan(scan: ScanRequest):
                     detail=f"Console '{scan.console_id}' not found"
                 )
 
-            distance = calculate_distance(
-                scan.scanned_lat, scan.scanned_lng,
-                console["approved_lat"], console["approved_lng"]
-            )
-            geo_status = get_geo_status(distance, console["radius_m"])
-
-            logger.info("geo check: distance=%.1fm radius=%dm status=%s",
-                        distance, console["radius_m"], geo_status)
+            # GPS unavailable — record scan without location verification
+            if scan.scanned_lat is None or scan.scanned_lng is None:
+                distance = None
+                geo_status = "NO_GPS"
+                logger.info("geo check: no GPS coordinates — status=NO_GPS")
+            else:
+                distance = calculate_distance(
+                    scan.scanned_lat, scan.scanned_lng,
+                    console["approved_lat"], console["approved_lng"]
+                )
+                geo_status = get_geo_status(distance, console["radius_m"])
+                logger.info("geo check: distance=%.1fm radius=%dm status=%s",
+                            distance, console["radius_m"], geo_status)
 
             cur.execute(
                 """

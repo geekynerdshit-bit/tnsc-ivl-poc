@@ -17,8 +17,8 @@ class ConsoleResponse(BaseModel):
 
 class ScanRequest(BaseModel):
     console_id: str
-    scanned_lat: float
-    scanned_lng: float
+    scanned_lat: Optional[float] = None   # None when GPS is denied
+    scanned_lng: Optional[float] = None   # None when GPS is denied
     scanned_by: Optional[str] = None
     device_info: Optional[str] = None
 
@@ -30,10 +30,10 @@ class ScanResponse(BaseModel):
     hospital: str
     city: str
     scanned_at: datetime
-    scanned_lat: float
-    scanned_lng: float
-    distance_m: float
-    geo_status: str
+    scanned_lat: Optional[float] = None
+    scanned_lng: Optional[float] = None
+    distance_m: Optional[float] = None
+    geo_status: str                        # VERIFIED | OUTSIDE_ZONE | NO_GPS
     scanned_by: Optional[str] = None
 
 
@@ -44,9 +44,9 @@ class ScanListItem(BaseModel):
     hospital: Optional[str] = None
     city: Optional[str] = None
     scanned_at: datetime
-    scanned_lat: float
-    scanned_lng: float
-    distance_m: float
+    scanned_lat: Optional[float] = None
+    scanned_lng: Optional[float] = None
+    distance_m: Optional[float] = None
     geo_status: str
     scanned_by: Optional[str] = None
     device_info: Optional[str] = None

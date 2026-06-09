@@ -67,7 +67,10 @@ export default function ScanPage() {
       })
       setScanResult(res.data)
     } catch (e) {
-      setError('Scan submission failed. Please try again.')
+      const msg = e?.response?.data?.detail || e?.response?.status
+        ? `Error ${e.response.status}: ${JSON.stringify(e.response.data)}`
+        : e?.message || 'Network error — check connection'
+      setError(`Scan failed: ${msg}`)
     } finally {
       setSubmitLoading(false)
     }
@@ -176,7 +179,7 @@ export default function ScanPage() {
         <input
           value={userName}
           onChange={e => setUserName(e.target.value)}
-          placeholder="e.g. Harshit"
+          placeholder="e.g. Nurse / Biomedical Engineer"
           style={{
             width: '100%',
             height: '48px',

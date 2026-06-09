@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from database import get_db
+from database import get_supabase
 from schemas import ConsoleResponse
 from log_config import get_logger
 from typing import List
@@ -10,22 +10,18 @@ logger = get_logger("routes.consoles")
 
 @router.get("/consoles", response_model=List[ConsoleResponse])
 def get_all_consoles():
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT * FROM consoles ORDER BY id")
-            rows = cur.fetchall()
-    logger.info("fetched %d consoles", len(rows))
-    return [dict(row) for row in rows]
+    supabase = get_supabase()
+    result = supabase.table("consoles").select("*").order("id").execute()
+    logger.info("fetched %d consoles", len(result.data))
+    return result.data
 
 
 @router.get("/consoles/{console_id}", response_model=ConsoleResponse)
 def get_console(console_id: str):
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT * FROM consoles WHERE id = %s", (console_id,))
-            row = cur.fetchone()
-    if not row:
+    supabase = get_supabase()
+    result = supabase.table("consoles").select("*").eq("id", console_id).execute()
+    if not result.data:
         logger.warning("console not found: %s", console_id)
         raise HTTPException(status_code=404, detail=f"Console '{console_id}' not found")
-    logger.info("fetched console %s (%s)", console_id, row["hospital"])
-    return dict(row)
+    logger.info("fetched console %s (%s)", console_id, result.data[0]["hospital"])
+    return result.data[0]

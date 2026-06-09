@@ -1,8 +1,9 @@
 from fastapi import APIRouter, HTTPException, Query
-from database import get_db
+from database import get_supabase
 from schemas import ScanRequest, ScanResponse, ScanListItem, StatsResponse
 from utils.geo import calculate_distance, get_geo_status
 from log_config import get_logger
+from datetime import date, timedelta
 from typing import List, Optional
 
 router = APIRouter()
@@ -11,63 +12,53 @@ logger = get_logger("routes.scans")
 
 @router.post("/scan", response_model=ScanResponse)
 def submit_scan(scan: ScanRequest):
-    logger.info("scan request: console=%s lat=%.6f lng=%.6f by=%s",
+    logger.info("scan request: console=%s lat=%s lng=%s by=%s",
                 scan.console_id, scan.scanned_lat, scan.scanned_lng, scan.scanned_by or "anonymous")
 
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT * FROM consoles WHERE id = %s", (scan.console_id,))
-            console = cur.fetchone()
+    supabase = get_supabase()
 
-            if not console:
-                logger.warning("scan rejected — console not found: %s", scan.console_id)
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Console '{scan.console_id}' not found"
-                )
+    # Look up console
+    result = supabase.table("consoles").select("*").eq("id", scan.console_id).execute()
+    if not result.data:
+        logger.warning("scan rejected — console not found: %s", scan.console_id)
+        raise HTTPException(status_code=404, detail=f"Console '{scan.console_id}' not found")
+    console = result.data[0]
 
-            # GPS unavailable — record scan without location verification
-            if scan.scanned_lat is None or scan.scanned_lng is None:
-                distance = None
-                geo_status = "NO_GPS"
-                logger.info("geo check: no GPS coordinates — status=NO_GPS")
-            else:
-                distance = calculate_distance(
-                    scan.scanned_lat, scan.scanned_lng,
-                    console["approved_lat"], console["approved_lng"]
-                )
-                geo_status = get_geo_status(distance, console["radius_m"])
-                logger.info("geo check: distance=%.1fm radius=%dm status=%s",
-                            distance, console["radius_m"], geo_status)
+    # Calculate distance or mark NO_GPS
+    if scan.scanned_lat is None or scan.scanned_lng is None:
+        distance = None
+        geo_status = "NO_GPS"
+        logger.info("geo check: no GPS coordinates — status=NO_GPS")
+    else:
+        distance = calculate_distance(
+            scan.scanned_lat, scan.scanned_lng,
+            console["approved_lat"], console["approved_lng"]
+        )
+        geo_status = get_geo_status(distance, console["radius_m"])
+        logger.info("geo check: distance=%.1fm radius=%dm status=%s",
+                    distance, console["radius_m"], geo_status)
 
-            cur.execute(
-                """
-                INSERT INTO scans
-                    (console_id, scanned_lat, scanned_lng, distance_m, geo_status, scanned_by, device_info)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-                RETURNING id, scanned_at
-                """,
-                (
-                    scan.console_id,
-                    scan.scanned_lat,
-                    scan.scanned_lng,
-                    distance,
-                    geo_status,
-                    scan.scanned_by,
-                    scan.device_info,
-                ),
-            )
-            result = cur.fetchone()
+    # Insert scan
+    insert_result = supabase.table("scans").insert({
+        "console_id": scan.console_id,
+        "scanned_lat": scan.scanned_lat,
+        "scanned_lng": scan.scanned_lng,
+        "distance_m": distance,
+        "geo_status": geo_status,
+        "scanned_by": scan.scanned_by,
+        "device_info": scan.device_info,
+    }).execute()
 
-    logger.info("scan saved: id=%d console=%s status=%s", result["id"], scan.console_id, geo_status)
+    row = insert_result.data[0]
+    logger.info("scan saved: id=%s console=%s status=%s", row["id"], scan.console_id, geo_status)
 
     return ScanResponse(
-        scan_id=result["id"],
+        scan_id=row["id"],
         console_id=scan.console_id,
         console_name=console["name"],
         hospital=console["hospital"],
         city=console["city"],
-        scanned_at=result["scanned_at"],
+        scanned_at=row["scanned_at"],
         scanned_lat=scan.scanned_lat,
         scanned_lng=scan.scanned_lng,
         distance_m=distance,
@@ -82,60 +73,58 @@ def get_all_scans(
     geo_status: Optional[str] = Query(None),
     limit: int = Query(100, le=500),
 ):
-    filters = []
+    supabase = get_supabase()
+
+    query = (
+        supabase.table("scans")
+        .select("*, consoles(name, hospital, city)")
+        .order("scanned_at", desc=True)
+        .limit(limit)
+    )
     if console_id:
-        filters.append(f"console_id={console_id}")
+        query = query.eq("console_id", console_id)
     if geo_status:
-        filters.append(f"geo_status={geo_status}")
-    logger.info("list scans: filters=[%s] limit=%d", ", ".join(filters) or "none", limit)
+        query = query.eq("geo_status", geo_status)
 
-    query = """
-        SELECT s.*, c.name AS console_name, c.hospital, c.city
-        FROM scans s
-        LEFT JOIN consoles c ON s.console_id = c.id
-        WHERE 1=1
-    """
-    params: list = []
+    result = query.execute()
 
-    if console_id:
-        query += " AND s.console_id = %s"
-        params.append(console_id)
-
-    if geo_status:
-        query += " AND s.geo_status = %s"
-        params.append(geo_status)
-
-    query += " ORDER BY s.scanned_at DESC LIMIT %s"
-    params.append(limit)
-
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute(query, params)
-            rows = cur.fetchall()
+    # Flatten nested consoles join into top-level fields
+    rows = []
+    for row in result.data:
+        console_info = row.pop("consoles", None) or {}
+        row["console_name"] = console_info.get("name")
+        row["hospital"] = console_info.get("hospital")
+        row["city"] = console_info.get("city")
+        rows.append(row)
 
     logger.info("returned %d scans", len(rows))
-    return [dict(row) for row in rows]
+    return rows
 
 
 @router.get("/stats", response_model=StatsResponse)
 def get_stats():
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT
-                    (SELECT COUNT(*) FROM consoles)                                   AS total_consoles,
-                    (SELECT COUNT(*) FROM scans)                                      AS total_scans,
-                    (SELECT COUNT(*) FROM scans WHERE geo_status = 'VERIFIED')        AS verified_scans,
-                    (SELECT COUNT(*) FROM scans WHERE geo_status = 'OUTSIDE_ZONE')    AS outside_zone_scans,
-                    (SELECT COUNT(DISTINCT console_id) FROM scans
-                     WHERE DATE(scanned_at) = CURRENT_DATE)                          AS consoles_scanned_today,
-                    (SELECT MAX(scanned_at) FROM scans)                              AS last_scan_at
-                """
-            )
-            row = cur.fetchone()
+    supabase = get_supabase()
 
-    stats = dict(row)
-    logger.info("stats: total_scans=%d verified=%d outside=%d",
-                stats["total_scans"], stats["verified_scans"], stats["outside_zone_scans"])
-    return StatsResponse(**stats)
+    total_consoles = (supabase.table("consoles").select("*", count="exact").execute().count or 0)
+    total_scans = (supabase.table("scans").select("*", count="exact").execute().count or 0)
+    verified_scans = (supabase.table("scans").select("*", count="exact").eq("geo_status", "VERIFIED").execute().count or 0)
+    outside_zone_scans = (supabase.table("scans").select("*", count="exact").eq("geo_status", "OUTSIDE_ZONE").execute().count or 0)
+
+    today = date.today().isoformat()
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    today_rows = supabase.table("scans").select("console_id").gte("scanned_at", today).lt("scanned_at", tomorrow).execute()
+    consoles_scanned_today = len(set(r["console_id"] for r in today_rows.data))
+
+    last_result = supabase.table("scans").select("scanned_at").order("scanned_at", desc=True).limit(1).execute()
+    last_scan_at = last_result.data[0]["scanned_at"] if last_result.data else None
+
+    logger.info("stats: total_scans=%d verified=%d outside=%d", total_scans, verified_scans, outside_zone_scans)
+
+    return StatsResponse(
+        total_consoles=total_consoles,
+        total_scans=total_scans,
+        verified_scans=verified_scans,
+        outside_zone_scans=outside_zone_scans,
+        consoles_scanned_today=consoles_scanned_today,
+        last_scan_at=last_scan_at,
+    )

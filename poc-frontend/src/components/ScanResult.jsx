@@ -44,7 +44,14 @@ function Row({ label, children }) {
 
 export default function ScanResult({ result }) {
   const geo = GEO[result.geo_status] || GEO.NO_GPS
-  const ident = result.identity_status ? IDENTITY[result.identity_status] : null
+  // Only a genuinely noteworthy identity event gets its own alert — a fresh
+  // registration, or a real mismatch needing review. MATCH/NO_PHOTO are the
+  // routine, expected state on every ordinary visit now that identity is
+  // admin-preseeded rather than independently re-checked via photo each
+  // time, so surfacing them as an "event" here would be noise, and the
+  // Serial/Mfg date rows below already show what's on file.
+  const showIdentityAlert = result.identity_status === 'REGISTERED' || result.identity_status === 'MISMATCH'
+  const ident = showIdentityAlert ? IDENTITY[result.identity_status] : null
   const mismatched = result.mismatched_fields || []
 
   const site = [result.room_name, result.floor, result.department].filter(Boolean).join(' · ')

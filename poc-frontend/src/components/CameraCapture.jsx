@@ -98,7 +98,7 @@ export default function CameraCapture({ onCapture, disabled }) {
       <div className="cam">
         <div className="cam-frame">
           <video ref={videoRef} playsInline muted className="cam-video" />
-          <div className="cam-guide"><span>Align the console label inside the frame</span></div>
+          <div className="cam-guide"><span>Get close — fill the frame with just the REF/SN block</span></div>
         </div>
         <div className="cam-actions">
           <button className="btn btn-ghost" onClick={stop} type="button">Cancel</button>
@@ -134,8 +134,24 @@ export default function CameraCapture({ onCapture, disabled }) {
         {starting ? 'Opening camera...' : 'Open Camera'}
       </button>
       <p className="cam-hint">
-        Photograph the console label showing its serial number and manufacturing date.
+        Get close enough that the REF and SN block fills most of the frame — a
+        distant photo of the whole label makes the serial too small to read
+        automatically.
       </p>
+
+      {/* TEMPORARY — TESTING ONLY. Remove this whole block (and the
+          matching CSS rule .cam-test-upload) before field rollout — the
+          product requirement is camera-only, no gallery upload. This exists
+          purely so OCR can be tested without a physical console on hand. */}
+      <label className="cam-test-upload">
+        🧪 Testing only — upload an existing photo instead
+        <input
+          type="file"
+          accept="image/*"
+          onChange={onFallbackFile}
+          style={{ display: 'none' }}
+        />
+      </label>
     </div>
   )
 }

@@ -324,7 +324,17 @@ export default function ScanPage() {
 
             {ocrState !== 'running' && (
               <>
-                {ocrMessage && <div className="scan-alert warn">{ocrMessage}</div>}
+                {ocrMessage && (
+                  <div className="scan-alert warn">
+                    {ocrMessage}
+                    {ocrRead.raw && (
+                      <details className="ocr-raw">
+                        <summary>Show what was detected on the photo</summary>
+                        <pre>{ocrRead.raw}</pre>
+                      </details>
+                    )}
+                  </div>
+                )}
 
                 <label className="field">
                   <span>Serial number <em className="req">*</em></span>

@@ -15,7 +15,7 @@ class ConsoleResponse(BaseModel):
     approved_lat: Optional[float] = None
     approved_lng: Optional[float] = None
     radius_m: int
-    status: str
+    status: Optional[str] = None
     is_site_registered: bool = False
 
     # Physical identity — admin-preseeded; null if not yet on file

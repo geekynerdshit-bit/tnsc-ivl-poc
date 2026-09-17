@@ -2,27 +2,26 @@ import React, { useState, useEffect } from 'react'
 import { getStats } from '../api/client'
 import LoadingSpinner from './LoadingSpinner'
 
-export default function StatsCards({ refreshTick }) {
+export default function StatsCards() {
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
-  const fetchStats = async () => {
-    setLoading(true)
-    try {
-      const res = await getStats()
-      setStats(res.data)
-      setError(null)
-    } catch {
-      setError('Failed to load stats.')
-    } finally {
-      setLoading(false)
-    }
-  }
-
   useEffect(() => {
+    const fetchStats = async () => {
+      setLoading(true)
+      try {
+        const res = await getStats()
+        setStats(res.data)
+        setError(null)
+      } catch {
+        setError('Failed to load stats.')
+      } finally {
+        setLoading(false)
+      }
+    }
     fetchStats()
-  }, [refreshTick])
+  }, [])
 
   if (loading) return <LoadingSpinner message="Loading stats..." />
   if (error) return <p style={{ color: '#ef4444', padding: '16px' }}>{error}</p>

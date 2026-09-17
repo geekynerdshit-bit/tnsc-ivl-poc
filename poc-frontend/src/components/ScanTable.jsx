@@ -54,7 +54,7 @@ const tdStyle = {
   borderBottom: '1px solid #f1f5f9',
 }
 
-export default function ScanTable({ refreshTick }) {
+export default function ScanTable() {
   const [scans, setScans] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -62,22 +62,21 @@ export default function ScanTable({ refreshTick }) {
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 640
   const hiddenOnMobile = isMobile ? 'none' : 'table-cell'
 
-  const fetchScans = async () => {
-    setLoading(true)
-    try {
-      const res = await getScans({ limit: 20 })
-      setScans(res.data)
-      setError(null)
-    } catch {
-      setError('Failed to load scans.')
-    } finally {
-      setLoading(false)
-    }
-  }
-
   useEffect(() => {
+    const fetchScans = async () => {
+      setLoading(true)
+      try {
+        const res = await getScans({ limit: 20 })
+        setScans(res.data)
+        setError(null)
+      } catch {
+        setError('Failed to load scans.')
+      } finally {
+        setLoading(false)
+      }
+    }
     fetchScans()
-  }, [refreshTick])
+  }, [])
 
   return (
     <div style={{ background: '#fff', borderRadius: '8px', padding: '20px', boxShadow: '0 1px 4px rgba(0,0,0,0.08)', marginTop: '24px' }}>

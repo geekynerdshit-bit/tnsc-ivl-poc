@@ -5,16 +5,20 @@ from datetime import datetime
 
 class ConsoleResponse(BaseModel):
     id: str
-    name: str
-    hospital: str
-    city: str
+    # Site (hospital/city/pincode/approved GPS) is admin-preseeded no longer —
+    # it's captured from the field on the console's first scan, so it's null
+    # until then. Only console identity below is preseeded by an admin.
+    name: Optional[str] = None
+    hospital: Optional[str] = None
+    city: Optional[str] = None
     pincode: Optional[str] = None
-    approved_lat: float
-    approved_lng: float
+    approved_lat: Optional[float] = None
+    approved_lng: Optional[float] = None
     radius_m: int
     status: str
+    is_site_registered: bool = False
 
-    # Physical identity — null until the console is registered on its first scan
+    # Physical identity — admin-preseeded; null if not yet on file
     serial_number: Optional[str] = None
     ref_number: Optional[str] = None
     mfg_date: Optional[str] = None
@@ -37,6 +41,13 @@ class ScanRequest(BaseModel):
     scanned_lng: Optional[float] = None   # None when GPS is denied
     scanned_by: Optional[str] = None
     device_info: Optional[str] = None
+
+    # Site detail — required only on this console's first scan, when the
+    # hospital/GPS point isn't on file yet. Becomes the console's permanent
+    # site record; not asked again on later visits.
+    hospital: Optional[str] = None
+    city: Optional[str] = None
+    pincode: Optional[str] = None
 
     # Captured photo (base64 JPEG) and what OCR read from it
     image_base64: Optional[str] = None

@@ -24,12 +24,12 @@ const GEO = {
 const IDENTITY = {
   REGISTERED: { tone: 'ok',   title: 'Console registered',
                 note: 'This serial is now bound to the tag. Future visits are checked against it.' },
-  MATCH:      { tone: 'ok',   title: 'Identity matches record',
-                note: 'The photographed console is the same unit registered to this tag.' },
+  MATCH:      { tone: 'ok',   title: 'Identity on file',
+                note: 'Serial/REF/mfg date for this visit are the ones on record for this console.' },
   MISMATCH:   { tone: 'bad',  title: 'Identity does not match',
                 note: 'Flagged for review. The record was NOT overwritten.' },
-  NO_PHOTO:   { tone: 'warn', title: 'No identity captured',
-                note: 'No readable label was recorded for this visit.' },
+  NO_PHOTO:   { tone: 'warn', title: 'Identity not on file',
+                note: 'No serial/REF/mfg date is registered for this console yet.' },
 }
 
 function Row({ label, children }) {

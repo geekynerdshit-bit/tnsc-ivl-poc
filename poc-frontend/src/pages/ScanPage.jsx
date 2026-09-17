@@ -1,9 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { getConsole, submitScan } from '../api/client'
-import { runLocalOcr } from '../utils/tesseractOcr'
 import LoadingSpinner from '../components/LoadingSpinner'
 import ScanResult from '../components/ScanResult'
-import CameraCapture from '../components/CameraCapture'
 
 /**
  * Field workflow, in the order required:
@@ -11,13 +9,14 @@ import CameraCapture from '../components/CameraCapture'
  *   1. GPS is captured IMMEDIATELY on tap, before anything else and before the
  *      engineer can interact with the form. Location must reflect where the tag
  *      was actually tapped, not where the phone ended up minutes later.
- *   2. Photograph the console label (camera only — see CameraCapture).
- *   3. OCR reads serial / REF / manufacturing date; the engineer confirms or
- *      corrects them.
- *   4. Site detail — hospital is fixed on the console record; department,
- *      floor and room are captured fresh on THIS visit (a console can move
- *      rooms within the same hospital, which the GPS geo-fence can't see).
- *   5. Engineer detail, then submit.
+ *   2. Register site — ONLY on this console's first scan, when no hospital/
+ *      GPS point is on file yet: hospital, city, pincode. This becomes the
+ *      console's permanent site record and this scan's GPS becomes its
+ *      approved point; neither is asked again on later visits.
+ *   3. Site detail — department, floor and room are captured fresh on
+ *      EVERY visit (a console can move rooms within the same hospital,
+ *      which the GPS geo-fence can't see).
+ *   4. Engineer detail, then submit.
  *
  *   Every field is mandatory except notes — this is the audit record for a
  *   real medical asset, so a partial visit is not accepted. GPS is the one
@@ -25,9 +24,12 @@ import CameraCapture from '../components/CameraCapture'
  *   as NO_GPS, since blocking submission entirely on a hardware/permission
  *   failure would lose the visit record rather than just its geo-verification.
  *
- *   First visit registers the identity against the tag. Later visits verify
- *   it and flag any mismatch for a human — the record is never silently
- *   overwritten.
+ *   Console identity (serial/REF/mfg date) is pre-seeded by an admin on the
+ *   console record and shown read-only above — it is not captured from the
+ *   engineer here. Photo capture + OCR-based identity verification are
+ *   shelved for now (see CameraCapture.jsx / tesseractOcr.js, kept but
+ *   unused) pending better real-world OCR accuracy; this can come back
+ *   later without rebuilding the identity plumbing on the backend.
  */
 export default function ScanPage() {
   const [tag, setTag] = useState(null)
@@ -41,17 +43,10 @@ export default function ScanPage() {
   const [gpsState, setGpsState] = useState('pending')  // pending | ok | denied
   const gpsStartedRef = useRef(false)
 
-  // Photo + OCR
-  const [photo, setPhoto] = useState(null)
-  const [ocrState, setOcrState] = useState('idle')     // idle | running | done | unavailable
-  const [ocrMessage, setOcrMessage] = useState(null)
-  const [ocrRead, setOcrRead] = useState({ serial: null, ref: null, mfg: null, raw: null })
-
-  // Confirmed identity values (prefilled from OCR, editable)
-  const [serial, setSerial] = useState('')
-  const [refNo, setRefNo] = useState('')
-  const [mfgDate, setMfgDate] = useState('')
-  const [overrideReason, setOverrideReason] = useState('')
+  // Site registration — only collected on this console's first scan
+  const [hospital, setHospital] = useState('')
+  const [city, setCity] = useState('')
+  const [pincode, setPincode] = useState('')
 
   // Site + engineer detail
   const [department, setDepartment] = useState('')
@@ -65,7 +60,7 @@ export default function ScanPage() {
   const [error, setError] = useState(null)
   const [result, setResult] = useState(null)
 
-  // ---- 1. tag + immediate GPS -------------------------------------------
+  // ---- tag + immediate GPS ------------------------------------------------
   useEffect(() => {
     const tagParam = new URLSearchParams(window.location.search).get('tag')
     setTag(tagParam || '')
@@ -112,69 +107,21 @@ export default function ScanPage() {
   }, [])
 
   const isRegistered = Boolean(consoleData?.is_registered)
-
-  // ---- 3. OCR on capture — runs entirely in the browser, no network call --
-  const handleCapture = async (dataUrl) => {
-    setPhoto(dataUrl)
-    setOcrState('running')
-    setOcrMessage(null)
-    try {
-      const d = await runLocalOcr(dataUrl)
-      if (!d.ocr_available) {
-        setOcrState('unavailable')
-        setOcrMessage(d.message || 'Automatic reading is unavailable — enter the details manually.')
-        return
-      }
-      setOcrRead({
-        serial: d.serial_number, ref: d.ref_number,
-        mfg: d.mfg_date, raw: d.raw_text,
-      })
-      setSerial(d.serial_number || '')
-      setRefNo(d.ref_number || '')
-      setMfgDate(d.mfg_date || '')
-      setOcrState('done')
-      if (!d.serial_number && !d.mfg_date) {
-        setOcrMessage('Nothing readable was found on the label. Enter the details manually or retake the photo.')
-      }
-    } catch {
-      setOcrState('unavailable')
-      setOcrMessage('Could not read the photo. Enter the details manually or retake.')
-    }
-  }
-
-  const retake = () => {
-    setPhoto(null)
-    setOcrState('idle')
-    setOcrMessage(null)
-    setOcrRead({ serial: null, ref: null, mfg: null, raw: null })
-    setSerial(''); setRefNo(''); setMfgDate(''); setOverrideReason('')
-  }
-
-  // Live mismatch preview against the stored record (server re-checks on submit)
-  const norm = (v) => (v || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
-  const serialMismatch =
-    isRegistered && serial && norm(serial) !== norm(consoleData.serial_number)
-  const mfgMismatch =
-    isRegistered && mfgDate && consoleData.mfg_date &&
-    norm(mfgDate) !== norm(consoleData.mfg_date)
-  const anyMismatch = serialMismatch || mfgMismatch
+  const isSiteRegistered = Boolean(consoleData?.is_site_registered)
 
   // Every field is mandatory except notes — this is the audit record, so a
   // partial visit isn't acceptable. Single source of truth for both the
   // submit-button gate and the "still needed" hint below.
   const missing = []
-  if (!photo) missing.push('console photo')
-  else {
-    if (!serial.trim()) missing.push('serial number')
-    if (!refNo.trim()) missing.push('REF number')
-    if (!mfgDate.trim()) missing.push('manufacturing date')
-    if (!department.trim()) missing.push('department')
-    if (!floor.trim()) missing.push('floor')
-    if (!roomName.trim()) missing.push('room')
-    if (!userName.trim()) missing.push('engineer name')
-    if (!userMobile.trim()) missing.push('mobile number')
-    if (anyMismatch && !overrideReason.trim()) missing.push('mismatch explanation')
+  if (!isSiteRegistered) {
+    if (!hospital.trim()) missing.push('hospital name')
+    if (!city.trim()) missing.push('city')
   }
+  if (!department.trim()) missing.push('department')
+  if (!floor.trim()) missing.push('floor')
+  if (!roomName.trim()) missing.push('room')
+  if (!userName.trim()) missing.push('engineer name')
+  if (!userMobile.trim()) missing.push('mobile number')
 
   const canSubmit = missing.length === 0 && !submitting
 
@@ -188,15 +135,9 @@ export default function ScanPage() {
         scanned_lng: gps.lng,
         scanned_by: userName.trim() || null,
         device_info: navigator.userAgent,
-        image_base64: photo,
-        ocr_serial: ocrRead.serial,
-        ocr_ref: ocrRead.ref,
-        ocr_mfg_date: ocrRead.mfg,
-        ocr_raw_text: ocrRead.raw,
-        given_serial: serial.trim() || null,
-        given_ref: refNo.trim() || null,
-        given_mfg_date: mfgDate.trim() || null,
-        override_reason: overrideReason.trim() || null,
+        hospital: !isSiteRegistered ? hospital.trim() || null : null,
+        city: !isSiteRegistered ? city.trim() || null : null,
+        pincode: !isSiteRegistered ? pincode.trim() || null : null,
         department: department.trim() || null,
         floor: floor.trim() || null,
         room_name: roomName.trim() || null,
@@ -246,25 +187,38 @@ export default function ScanPage() {
 
   return (
     <div className="scan-wrap">
-      {/* Console identity */}
+      {/* Console identity — pre-seeded by an admin, shown read-only */}
       <div className="scan-card">
         <div className="scan-eyebrow">
           {consoleData.id}
           <span className={`chip ${isRegistered ? 'chip-ok' : 'chip-new'}`}>
-            {isRegistered ? 'Registered' : 'First registration'}
+            {isRegistered ? 'Registered' : 'Not yet registered'}
           </span>
         </div>
-        <h1>{consoleData.hospital}</h1>
-        <p className="scan-sub">
-          {consoleData.city}{consoleData.pincode ? ` — ${consoleData.pincode}` : ''}
-        </p>
-        {isRegistered && (
+        {isSiteRegistered ? (
+          <>
+            <h1>{consoleData.hospital}</h1>
+            <p className="scan-sub">
+              {consoleData.city}{consoleData.pincode ? ` — ${consoleData.pincode}` : ''}
+            </p>
+          </>
+        ) : (
+          <h1>New console</h1>
+        )}
+        {isRegistered ? (
           <div className="known-identity">
-            <div><span>Serial on record</span><b>{consoleData.serial_number}</b></div>
+            <div><span>Serial number</span><b>{consoleData.serial_number}</b></div>
+            {consoleData.ref_number && <div><span>REF</span><b>{consoleData.ref_number}</b></div>}
             {consoleData.mfg_date && <div><span>Mfg date</span><b>{consoleData.mfg_date}</b></div>}
             {consoleData.current_room && (
               <div><span>Last known room</span><b>{consoleData.current_room}</b></div>
             )}
+          </div>
+        ) : (
+          <div className="scan-alert warn">
+            No serial/REF/mfg date on file for this console yet. Location and
+            visit detail will still be recorded — ask an admin to register
+            its identity.
           </div>
         )}
       </div>
@@ -291,159 +245,92 @@ export default function ScanPage() {
         )}
       </div>
 
-      {/* Step 2 — photograph the label */}
-      <div className="step">
-        <div className="step-head">
-          <span className="step-num">2</span>
-          <span className="step-title">Console photo</span>
-          {photo && <span className="chip chip-ok">Captured</span>}
-        </div>
-        <div className="step-body">
-          {!photo && <CameraCapture onCapture={handleCapture} />}
-          {photo && (
-            <>
-              <img src={photo} alt="Captured console label" className="shot" />
-              <button className="btn btn-ghost" onClick={retake} type="button">Retake photo</button>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Step 3 — confirm the extracted identity */}
-      {photo && (
+      {/* Step 2 — register the site (only if not already on file) */}
+      {!isSiteRegistered && (
         <div className="step">
           <div className="step-head">
-            <span className="step-num">3</span>
-            <span className="step-title">{isRegistered ? 'Verify identity' : 'Register identity'}</span>
-            {ocrState === 'done' && <span className="chip chip-ok">Read automatically</span>}
-            {ocrState === 'unavailable' && <span className="chip chip-warn">Manual entry</span>}
-          </div>
-
-          <div className="step-body">
-            {ocrState === 'running' && <LoadingSpinner message="Reading the label..." />}
-
-            {ocrState !== 'running' && (
-              <>
-                {ocrMessage && (
-                  <div className="scan-alert warn">
-                    {ocrMessage}
-                    {ocrRead.raw && (
-                      <details className="ocr-raw">
-                        <summary>Show what was detected on the photo</summary>
-                        <pre>{ocrRead.raw}</pre>
-                      </details>
-                    )}
-                  </div>
-                )}
-
-                <label className="field">
-                  <span>Serial number <em className="req">*</em></span>
-                  <input value={serial} onChange={(e) => setSerial(e.target.value)}
-                         placeholder="e.g. 53941" autoCapitalize="characters" />
-                  {serialMismatch && (
-                    <em className="field-err">
-                      Does not match the record ({consoleData.serial_number})
-                    </em>
-                  )}
-                </label>
-
-                <label className="field">
-                  <span>REF / catalogue number <em className="req">*</em></span>
-                  <input value={refNo} onChange={(e) => setRefNo(e.target.value)} placeholder="e.g. 825D" />
-                </label>
-
-                <label className="field">
-                  <span>Manufacturing date <em className="req">*</em></span>
-                  <input value={mfgDate} onChange={(e) => setMfgDate(e.target.value)} placeholder="YYYY-MM" />
-                  {mfgMismatch && (
-                    <em className="field-err">
-                      Does not match the record ({consoleData.mfg_date})
-                    </em>
-                  )}
-                </label>
-
-                {anyMismatch && (
-                  <div className="scan-alert danger">
-                    <b>Identity does not match this tag.</b>
-                    <p>
-                      This can be a poor photo or OCR misread — or this tag may be on a
-                      different console. Explain below; the record is not overwritten and
-                      the visit is flagged for review.
-                    </p>
-                    <textarea
-                      value={overrideReason}
-                      onChange={(e) => setOverrideReason(e.target.value)}
-                      placeholder="e.g. Label worn, serial re-read by hand; console is physically the same unit"
-                      rows={3}
-                    />
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Step 4 — site detail for this visit */}
-      {photo && (
-        <div className="step">
-          <div className="step-head">
-            <span className="step-num">4</span>
-            <span className="step-title">Site detail</span>
+            <span className="step-num">2</span>
+            <span className="step-title">Register site</span>
           </div>
           <div className="step-body">
+            <div className="scan-alert warn">
+              No hospital is on file for this console yet. This will become
+              its permanent site record, and your current location the
+              approved point for future visits.
+            </div>
             <label className="field">
-              <span>Department <em className="req">*</em></span>
-              <input value={department} onChange={(e) => setDepartment(e.target.value)}
-                     placeholder="e.g. Cath Lab, Cardiology, ICU" />
+              <span>Hospital name <em className="req">*</em></span>
+              <input value={hospital} onChange={(e) => setHospital(e.target.value)}
+                     placeholder="e.g. Apollo Hospital Indraprastha" />
             </label>
             <div className="field-row">
               <label className="field">
-                <span>Floor <em className="req">*</em></span>
-                <input value={floor} onChange={(e) => setFloor(e.target.value)} placeholder="e.g. 2nd Floor" />
+                <span>City <em className="req">*</em></span>
+                <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="e.g. New Delhi" />
               </label>
               <label className="field">
-                <span>Room <em className="req">*</em></span>
-                <input value={roomName} onChange={(e) => setRoomName(e.target.value)} placeholder="e.g. Cath Lab 2" />
+                <span>Pincode <i>(optional)</i></span>
+                <input value={pincode} onChange={(e) => setPincode(e.target.value)} placeholder="e.g. 110076" />
               </label>
             </div>
           </div>
         </div>
       )}
 
-      {/* Step 5 — who is recording it */}
-      {photo && (
-        <div className="step">
-          <div className="step-head">
-            <span className="step-num">5</span>
-            <span className="step-title">Service engineer</span>
-          </div>
-          <div className="step-body">
+      {/* Step 3 — site detail for this visit */}
+      <div className="step">
+        <div className="step-head">
+          <span className="step-num">{isSiteRegistered ? 2 : 3}</span>
+          <span className="step-title">Site detail</span>
+        </div>
+        <div className="step-body">
+          <label className="field">
+            <span>Department <em className="req">*</em></span>
+            <input value={department} onChange={(e) => setDepartment(e.target.value)}
+                   placeholder="e.g. Cath Lab, Cardiology, ICU" />
+          </label>
+          <div className="field-row">
             <label className="field">
-              <span>Your name <em className="req">*</em></span>
-              <input value={userName} onChange={(e) => setUserName(e.target.value)}
-                     placeholder="e.g. A. Pandey" />
+              <span>Floor <em className="req">*</em></span>
+              <input value={floor} onChange={(e) => setFloor(e.target.value)} placeholder="e.g. 2nd Floor" />
             </label>
             <label className="field">
-              <span>Mobile number <em className="req">*</em></span>
-              <input value={userMobile} onChange={(e) => setUserMobile(e.target.value)}
-                     type="tel" placeholder="e.g. 98xxxxxxxx" />
-            </label>
-            <label className="field">
-              <span>Notes <i>(optional)</i></span>
-              <textarea value={notes} onChange={(e) => setNotes(e.target.value)}
-                        placeholder="Anything worth flagging about this visit" rows={2} />
+              <span>Room <em className="req">*</em></span>
+              <input value={roomName} onChange={(e) => setRoomName(e.target.value)} placeholder="e.g. Cath Lab 2" />
             </label>
           </div>
         </div>
-      )}
+      </div>
+
+      {/* Step 4 — who is recording it */}
+      <div className="step">
+        <div className="step-head">
+          <span className="step-num">{isSiteRegistered ? 3 : 4}</span>
+          <span className="step-title">Service engineer</span>
+        </div>
+        <div className="step-body">
+          <label className="field">
+            <span>Your name <em className="req">*</em></span>
+            <input value={userName} onChange={(e) => setUserName(e.target.value)}
+                   placeholder="e.g. A. Pandey" />
+          </label>
+          <label className="field">
+            <span>Mobile number <em className="req">*</em></span>
+            <input value={userMobile} onChange={(e) => setUserMobile(e.target.value)}
+                   type="tel" placeholder="e.g. 98xxxxxxxx" />
+          </label>
+          <label className="field">
+            <span>Notes <i>(optional)</i></span>
+            <textarea value={notes} onChange={(e) => setNotes(e.target.value)}
+                      placeholder="Anything worth flagging about this visit" rows={2} />
+          </label>
+        </div>
+      </div>
 
       {error && <div className="scan-alert danger">{error}</div>}
 
       <button className="btn btn-primary btn-lg" onClick={handleSubmit} disabled={!canSubmit}>
-        {submitting
-          ? 'Recording...'
-          : isRegistered ? 'Record Verification' : 'Register Console'}
+        {submitting ? 'Recording...' : 'Record Visit'}
       </button>
 
       {missing.length > 0 && (

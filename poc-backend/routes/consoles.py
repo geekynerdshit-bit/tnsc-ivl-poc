@@ -44,6 +44,7 @@ def _latest_locations(supabase, console_ids: Optional[List[str]] = None) -> dict
 def _enrich(row: dict, location: Optional[dict]) -> dict:
     row = dict(row)
     row["is_registered"] = bool(row.get("serial_number"))
+    row["is_site_registered"] = bool(row.get("hospital"))
     row["current_department"] = (location or {}).get("department")
     row["current_floor"] = (location or {}).get("floor")
     row["current_room"] = (location or {}).get("room_name")

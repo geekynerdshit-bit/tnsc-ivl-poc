@@ -29,21 +29,19 @@ def normalize_timestamp(value):
     return value
 
 
-# OCR runs entirely in the browser now (Tesseract.js, see poc-frontend's
-# src/utils/tesseractOcr.js) — no server-side OCR endpoint, no Google Cloud
-# dependency, no API key. The backend still receives and stores whatever the
-# client-side OCR read (ocr_serial/ocr_ref/ocr_mfg_date/ocr_raw_text on
-# ScanRequest below) purely as an audit record of what was detected.
+# Photo capture + OCR are shelved for now (accuracy on real hospital-network
+# photos wasn't reliable enough yet — see poc-frontend's tesseractOcr.js).
+# Identity (serial/REF/mfg date) is instead pre-seeded directly on the
+# console record by an admin and simply echoed back on every scan below,
+# rather than captured from the engineer each visit. The ScanRequest/compare()
+# plumbing for photo evidence and mismatch detection is left in place (not
+# deleted) so this can be re-enabled later without rebuilding it.
 
 # Every field is mandatory except notes — this is the audit record for a real
 # medical asset, not a casual form. Enforced here too, not just in the
 # frontend, so the API rejects an incomplete visit regardless of caller (a
 # future mobile app, a direct API call, a stale frontend build).
 _REQUIRED_FIELDS = [
-    ("image_base64", "console photo"),
-    ("given_serial", "serial number"),
-    ("given_ref", "REF number"),
-    ("given_mfg_date", "manufacturing date"),
     ("department", "department"),
     ("floor", "floor"),
     ("room_name", "room"),
@@ -51,9 +49,18 @@ _REQUIRED_FIELDS = [
     ("engineer_mobile", "mobile number"),
 ]
 
+# Only asked once per console — on the first scan, when no site is on file
+# yet. Not required on later visits, since the site is fixed once set.
+_SITE_REQUIRED_FIELDS = [
+    ("hospital", "hospital name"),
+    ("city", "city"),
+]
 
-def _require_fields(scan: ScanRequest) -> None:
+
+def _require_fields(scan: ScanRequest, is_site_registered: bool) -> None:
     missing = [label for attr, label in _REQUIRED_FIELDS if not (getattr(scan, attr) or "").strip()]
+    if not is_site_registered:
+        missing += [label for attr, label in _SITE_REQUIRED_FIELDS if not (getattr(scan, attr) or "").strip()]
     if missing:
         raise HTTPException(status_code=400, detail=f"Missing required field(s): {', '.join(missing)}")
 
@@ -72,29 +79,47 @@ def submit_scan(scan: ScanRequest):
         raise HTTPException(status_code=404, detail=f"Console '{scan.console_id}' not found")
     console = result.data[0]
 
-    _require_fields(scan)
+    is_site_registered = bool(console.get("hospital"))
+    has_geo_baseline = console.get("approved_lat") is not None and console.get("approved_lng") is not None
 
-    # Calculate distance or mark NO_GPS
-    if scan.scanned_lat is None or scan.scanned_lng is None:
+    _require_fields(scan, is_site_registered)
+
+    # Calculate distance against the approved point, or — if this console has
+    # no approved point yet (first scan, or an earlier scan that lost GPS
+    # before one could be set) — this scan's GPS becomes that point.
+    if has_geo_baseline:
+        if scan.scanned_lat is None or scan.scanned_lng is None:
+            distance = None
+            geo_status = "NO_GPS"
+            logger.info("geo check: no GPS coordinates — status=NO_GPS")
+        else:
+            distance = calculate_distance(
+                scan.scanned_lat, scan.scanned_lng,
+                console["approved_lat"], console["approved_lng"]
+            )
+            geo_status = get_geo_status(distance, console["radius_m"])
+            logger.info("geo check: distance=%.1fm radius=%dm status=%s",
+                        distance, console["radius_m"], geo_status)
+    elif scan.scanned_lat is not None and scan.scanned_lng is not None:
+        distance = 0.0
+        geo_status = "VERIFIED"
+        logger.info("geo check: no approved point on file yet — this scan sets it")
+    else:
         distance = None
         geo_status = "NO_GPS"
-        logger.info("geo check: no GPS coordinates — status=NO_GPS")
-    else:
-        distance = calculate_distance(
-            scan.scanned_lat, scan.scanned_lng,
-            console["approved_lat"], console["approved_lng"]
-        )
-        geo_status = get_geo_status(distance, console["radius_m"])
-        logger.info("geo check: distance=%.1fm radius=%dm status=%s",
-                    distance, console["radius_m"], geo_status)
+        logger.info("geo check: no GPS coordinates and no approved point on file — status=NO_GPS")
 
-    # ---- identity: register on first visit, verify on every later one ----
+    # ---- identity: pre-seeded on the console record by an admin, not      --
+    # ---- captured from the engineer (photo/OCR capture is shelved for now)--
     known_serial = console.get("serial_number")
+    known_ref = console.get("ref_number")
     known_mfg = console.get("mfg_date")
 
-    given_serial = (scan.given_serial or "").strip() or None
-    given_ref = (scan.given_ref or "").strip() or None
-    given_mfg = (scan.given_mfg_date or "").strip() or None
+    # Client-submitted given_* (from the old photo/OCR flow) still wins if
+    # ever sent, so this keeps working unchanged once that flow returns.
+    given_serial = (scan.given_serial or "").strip() or known_serial
+    given_ref = (scan.given_ref or "").strip() or known_ref
+    given_mfg = (scan.given_mfg_date or "").strip() or known_mfg
 
     verdict = compare(console, given_serial, given_mfg)
     identity_status = verdict["status"]
@@ -107,11 +132,13 @@ def submit_scan(scan: ScanRequest):
         )
 
     # An engineer submitting values that differ from what OCR read is an
-    # explicit manual correction, and is recorded as such.
+    # explicit manual correction. Only meaningful when OCR actually ran —
+    # with OCR shelved, ocr_serial/ocr_mfg_date are always empty and this is
+    # always False (given_* being pre-filled from the console record is the
+    # normal case now, not a correction).
     manual_override = bool(
-        (given_serial and scan.ocr_serial and given_serial != scan.ocr_serial)
-        or (given_mfg and scan.ocr_mfg_date and given_mfg != scan.ocr_mfg_date)
-        or (given_serial and not scan.ocr_serial)
+        (scan.ocr_serial and given_serial and given_serial != scan.ocr_serial)
+        or (scan.ocr_mfg_date and given_mfg and given_mfg != scan.ocr_mfg_date)
     )
 
     logger.info("identity: type=%s status=%s mismatched=%s override=%s",
@@ -166,12 +193,34 @@ def submit_scan(scan: ScanRequest):
         logger.info("console %s registered: serial=%s mfg=%s",
                     scan.console_id, given_serial, given_mfg)
 
+    # Bind the site (hospital/city/pincode + approved GPS) the first time
+    # either is missing. Once set, never overwritten by a later scan — a
+    # console's site is fixed the same way its identity is.
+    console_update = {}
+    resolved_hospital = console.get("hospital")
+    resolved_city = console.get("city")
+    if not is_site_registered:
+        resolved_hospital = (scan.hospital or "").strip()
+        resolved_city = (scan.city or "").strip()
+        console_update.update({
+            "hospital": resolved_hospital,
+            "city": resolved_city,
+            "pincode": (scan.pincode or "").strip() or None,
+            "status": "active",
+        })
+    if not has_geo_baseline and scan.scanned_lat is not None and scan.scanned_lng is not None:
+        console_update["approved_lat"] = scan.scanned_lat
+        console_update["approved_lng"] = scan.scanned_lng
+    if console_update:
+        supabase.table("consoles").update(console_update).eq("id", scan.console_id).execute()
+        logger.info("console %s site updated: %s", scan.console_id, list(console_update.keys()))
+
     return ScanResponse(
         scan_id=row["id"],
         console_id=scan.console_id,
-        console_name=console["name"],
-        hospital=console["hospital"],
-        city=console["city"],
+        console_name=console.get("name") or scan.console_id,
+        hospital=resolved_hospital,
+        city=resolved_city,
         scanned_at=normalize_timestamp(row["scanned_at"]),
         scanned_lat=scan.scanned_lat,
         scanned_lng=scan.scanned_lng,

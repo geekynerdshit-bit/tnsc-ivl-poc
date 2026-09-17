@@ -87,8 +87,12 @@ export default function ConsoleMap() {
         />
         <MapLegend />
 
-        {/* Console markers — blue default marker */}
-        {consoles.map(c => (
+        {/* Console markers — blue default marker. A console with no site
+            registered yet (first scan not done) has no approved point, so
+            it's skipped here rather than plotted at (undefined, undefined). */}
+        {consoles
+          .filter(c => c.approved_lat != null && c.approved_lng != null)
+          .map(c => (
           <Marker key={c.id} position={[c.approved_lat, c.approved_lng]}>
             <Popup>
               <b>{c.name}</b><br />

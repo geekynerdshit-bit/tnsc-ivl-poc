@@ -3,19 +3,39 @@
  * utils/ocr.py, which was calibrated against 4 real Shockwave Medical IVL
  * console labels. Keep this in sync with that file if the patterns change.
  *
- * Real-world finding: these labels have NO "MFG:" text label — the
+ * Real-world finding #1: these labels have NO "MFG:" text label — the
  * manufacture date sits directly beneath "SN", inside the same shaded box
  * as the serial, marked only by a pictogram icon that OCR cannot read as
  * text. So manufacturing-date extraction relies primarily on finding a bare
  * YYYY-MM(-DD) date positioned near the SN block, not a text label.
+ *
+ * Real-world finding #2: a same-line "SN 53941" assumption breaks on actual
+ * phone photos. The label is a dense grid of icon boxes + address blocks +
+ * hazard pictograms; Tesseract's page segmentation frequently reorders text
+ * from that layout, so the label word and its value often land on different
+ * OCR lines even though they're on the same physical row. Fields are
+ * therefore searched line-by-line with a small look-ahead, not as a single
+ * "label immediately followed by value" regex on the raw string. This also
+ * fixed a real failure where, with no SN value found nearby, a fallback
+ * scan of "anything alnum with both a letter and a digit" grabbed the
+ * manufacturer's Irish postal code (EC REP address, "D18 X5R3") instead of
+ * the real serial — that fallback is now restricted to a window near the
+ * SN label and skips lines that look like address/company text.
  */
 
-const SERIAL_LABELLED = /(?:SERIAL(?:\s*(?:NO|NUMBER))?|S\/?N)\s*[:.\-#]?\s*([A-Z0-9][A-Z0-9\-/]{2,})/i
-const REF_LABELLED = /(?:REF(?:ERENCE)?|CAT(?:ALOG(?:UE)?)?(?:\s*NO)?)\s*[:.\-#]?\s*([A-Z0-9][A-Z0-9\-/]{2,})/i
+const SERIAL_LABEL = /(?:SERIAL(?:\s*(?:NO|NUMBER))?|S\s?\/?\s?N)\b\s*[:.\-#]?\s*(.*)$/i
+const REF_LABEL = /(?:REF(?:ERENCE)?|CAT(?:ALOG(?:UE)?)?(?:\s*NO)?)\b\s*[:.\-#]?\s*(.*)$/i
 // Explicit label case — kept for manufacturers who DO print "MFG:"/"Manufactured"
-const MFG_LABELLED = /(?:MFG|MFD|MANUF(?:ACTURED|ACTURING)?(?:\s*(?:DATE|ON))?|DATE\s*OF\s*MANUFACTURE|DOM)\s*[:.\-]?\s*([0-9]{1,4}[\-/. ][0-9]{1,4}(?:[\-/. ][0-9]{1,4})?|[A-Z]{3,9}\s*[\-/. ]?\s*[0-9]{4})/i
-// Bare date, no label — this is the primary path on real hardware
+const MFG_LABEL = /(?:MFG|MFD|MANUF(?:ACTURED|ACTURING)?(?:\s*(?:DATE|ON))?|DATE\s*OF\s*MANUFACTURE|DOM)\b\s*[:.\-]?\s*(.*)$/i
+
+const VALUE_TOKEN = /\b[A-Z0-9][A-Z0-9\-/]{2,}\b/i
 const BARE_DATE = /\b(20\d{2})[\-/.]([01]?\d)(?:[\-/.]([0-3]?\d))?\b/
+const MONTH_DATE = /\b([A-Z]{3,9})\s*[\-/. ]?\s*(\d{4})\b/i
+
+// Lines carrying these words are manufacturer/EC-REP address blocks, not the
+// SN/REF value block — skip them when scanning nearby lines for a value so
+// a postal code or building number is never mistaken for the serial.
+const ADDRESS_LINE = /\b(DUBLIN|IRELAND|COUNTY|LEOPARDSTOWN|BUSINESS|PARK|LIMITED|LTD|DRIVE|STREET|ROAD|CLARA|SANTA|ROSS|BETSY|REP|ICON|INC|INDIA|INDUSTRIAL|inc\.)\b/i
 
 const MONTHS = {
   jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
@@ -55,36 +75,92 @@ export function normalizeMfgDate(raw) {
   return null
 }
 
-function first(pattern, text) {
-  const m = text.match(pattern)
-  return m ? m[1].trim() : null
+function splitLines(text) {
+  return (text || '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+}
+
+/**
+ * Find a label (e.g. "SN") anywhere in the line array, then look for a
+ * value matching `valuePattern` — first in the remainder of that same line,
+ * then in the following `lookahead` lines (skipping ones that look like an
+ * address block). This tolerates the label and value landing on separate
+ * OCR lines, which is the common case for this label's layout.
+ */
+function findNear(lines, labelPattern, valuePattern, lookahead = 2) {
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(labelPattern)
+    if (!m) continue
+
+    const sameLineRest = m[1] || ''
+    const sameLineHit = sameLineRest.match(valuePattern)
+    if (sameLineHit) return { value: sameLineHit[0], lineIndex: i }
+
+    for (let j = i + 1; j <= Math.min(i + lookahead, lines.length - 1); j++) {
+      if (ADDRESS_LINE.test(lines[j])) continue
+      const hit = lines[j].match(valuePattern)
+      if (hit) return { value: hit[0], lineIndex: j }
+    }
+  }
+  return null
 }
 
 export function parseFields(text) {
   const t = text || ''
-  let serial = first(SERIAL_LABELLED, t)
-  const ref = first(REF_LABELLED, t)
+  const lines = splitLines(t)
 
-  let mfgRaw = first(MFG_LABELLED, t)
+  const serialHit = findNear(lines, SERIAL_LABEL, VALUE_TOKEN)
+  let serial = serialHit ? serialHit.value : null
+
+  const refHit = findNear(lines, REF_LABEL, VALUE_TOKEN)
+  const ref = refHit ? refHit.value : null
+
+  let mfgRaw = null
+  const mfgLabelHit = findNear(lines, MFG_LABEL, /.+/, 1)
+  if (mfgLabelHit) {
+    const dateInValue = mfgLabelHit.value.match(BARE_DATE) || mfgLabelHit.value.match(MONTH_DATE)
+    if (dateInValue) mfgRaw = dateInValue[0]
+  }
 
   if (!mfgRaw) {
-    // No text label on real hardware — prefer a bare date positioned near
-    // the SN block over one found anywhere else, since a standards/
-    // compliance footer (AAMI/IEC/CSA references) can otherwise be the
-    // nearest thing that looks date-shaped.
-    const snMatch = t.match(SERIAL_LABELLED)
-    const searchFrom = snMatch ? snMatch.index + snMatch[0].length : 0
-    const window = t.slice(searchFrom, searchFrom + 60)
-    const m = window.match(BARE_DATE) || t.match(BARE_DATE)
-    if (m) mfgRaw = m[0]
+    // No text label on real hardware — the date sits on the line right
+    // after (or on) the SN row, inside the same box. Search near the SN
+    // label first so a compliance/standards footer elsewhere on the label
+    // isn't mistaken for the manufacture date.
+    if (serialHit) {
+      for (let j = serialHit.lineIndex; j <= Math.min(serialHit.lineIndex + 2, lines.length - 1); j++) {
+        const m = lines[j].match(BARE_DATE)
+        if (m) { mfgRaw = m[0]; break }
+      }
+    }
+    if (!mfgRaw) {
+      const m = t.match(BARE_DATE)
+      if (m) mfgRaw = m[0]
+    }
   }
 
   if (!serial) {
-    const candidates = (t.toUpperCase().match(/\b[A-Z0-9][A-Z0-9\-/]{5,}\b/g) || [])
-      .filter((c) => /\d/.test(c) && /[A-Z]/.test(c))
-      .filter((c) => !ref || c !== ref.toUpperCase())
-    if (candidates.length) {
-      serial = candidates.reduce((a, b) => (b.length > a.length ? b : a))
+    // Last-resort fallback: scan for a standalone value token near wherever
+    // "SN" appears (even if findNear's stricter label match failed), never
+    // requiring a letter+digit mix — a real serial can be pure digits.
+    // Address/company lines are excluded so a postal code or street number
+    // is never picked up instead.
+    const snIdx = lines.findIndex((l) => /\bS\s?\/?\s?N\b/i.test(l) && !ADDRESS_LINE.test(l))
+    const searchLines = snIdx >= 0
+      ? lines.slice(snIdx, Math.min(snIdx + 3, lines.length))
+      : lines.filter((l) => !ADDRESS_LINE.test(l))
+
+    for (const line of searchLines) {
+      if (ADDRESS_LINE.test(line)) continue
+      const candidates = (line.toUpperCase().match(VALUE_TOKEN) || [])
+        .filter((c) => !ref || c !== ref.toUpperCase())
+        .filter((c) => !/^(SN|REF|MFG|MFD|EC|LR|CE|MD)$/.test(c))
+      if (candidates.length) {
+        serial = candidates.reduce((a, b) => (b.length > a.length ? b : a))
+        break
+      }
     }
   }
 

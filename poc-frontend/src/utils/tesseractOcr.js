@@ -129,6 +129,17 @@ function getWorker() {
       corePath: '/tesseract/tesseract-core-simd-lstm.wasm.js',
       langPath: '/tesseract/',
       cacheMethod: 'none', // traineddata is already local; no need to cache to IndexedDB
+    }).then(async (worker) => {
+      // Default full-page auto-segmentation tries to detect multiple text
+      // blocks/columns, which real label photos defeat: this label is a
+      // dense grid of icon boxes, hazard pictograms and address blocks, and
+      // auto-segmentation was observed to reorder "SN" away from its value
+      // in the extracted text. PSM 6 ("assume a single uniform block of
+      // text") skips block detection and reads top-to-bottom by line
+      // instead, which tracks the label's actual row layout far more
+      // reliably.
+      await worker.setParameters({ tessedit_pageseg_mode: '6' })
+      return worker
     })
   }
   return workerPromise

@@ -14,6 +14,11 @@
 
 export const config = {
   matcher: ['/dashboard', '/dashboard/:path*', '/tags', '/tags/:path*'],
+  // Vercel now prefers the Node.js runtime for Middleware over the older
+  // Edge-only default. Everything this file uses (Request/Response/URL,
+  // FormData, crypto.subtle) is a standard Web API available in both, so
+  // this is a config-only change — no logic here needed to move.
+  runtime: 'nodejs',
 };
 
 const COOKIE_NAME = 'tnsc_dash_auth';

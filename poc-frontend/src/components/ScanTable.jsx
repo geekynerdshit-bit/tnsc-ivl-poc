@@ -97,6 +97,7 @@ export default function ScanTable({ refreshTick }) {
                 <th style={thStyle}>Console</th>
                 <th style={{ ...thStyle, display: hiddenOnMobile }}>Hospital</th>
                 <th style={thStyle}>City</th>
+                <th style={thStyle}>Location</th>
                 <th style={thStyle}>Time</th>
                 <th style={{ ...thStyle, display: hiddenOnMobile }}>Distance</th>
                 <th style={thStyle}>Status</th>
@@ -114,6 +115,21 @@ export default function ScanTable({ refreshTick }) {
                     {scan.hospital || '—'}
                   </td>
                   <td style={tdStyle}>{scan.city || '—'}</td>
+                  <td style={tdStyle}>
+                    {scan.room_name || scan.department || '—'}
+                    {scan.location_changed && (
+                      <span
+                        title={`Moved from: ${[scan.prev_room_name, scan.prev_floor, scan.prev_department].filter(Boolean).join(' · ') || '—'}`}
+                        style={{
+                          marginLeft: 6, display: 'inline-block', padding: '1px 6px', borderRadius: '10px',
+                          background: '#FFFBEB', color: '#92400E', border: '1px solid #f59e0b',
+                          fontSize: '10px', fontWeight: 700, cursor: 'help',
+                        }}
+                      >
+                        MOVED
+                      </span>
+                    )}
+                  </td>
                   <td style={tdStyle}>{formatTime(scan.scanned_at)}</td>
                   <td style={{ ...tdStyle, display: hiddenOnMobile }}>{formatDistance(scan.distance_m)}</td>
                   <td style={tdStyle}><StatusBadge status={scan.geo_status} /></td>

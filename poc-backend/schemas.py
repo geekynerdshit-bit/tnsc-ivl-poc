@@ -99,6 +99,16 @@ class ScanResponse(BaseModel):
     engineer_mobile: Optional[str] = None
     notes: Optional[str] = None
 
+    # True when this visit's department/floor/room differs from the
+    # console's previous visit — department/floor/room are pre-filled from
+    # that previous visit in the UI, so a difference means the engineer
+    # deliberately edited it: a signal the console was physically moved.
+    # prev_* below is what it changed FROM, for a from/to diff in the UI.
+    location_changed: bool = False
+    prev_department: Optional[str] = None
+    prev_floor: Optional[str] = None
+    prev_room_name: Optional[str] = None
+
 
 class ScanListItem(BaseModel):
     id: int
@@ -126,6 +136,11 @@ class ScanListItem(BaseModel):
     room_name: Optional[str] = None
     engineer_mobile: Optional[str] = None
     notes: Optional[str] = None
+
+    location_changed: bool = False
+    prev_department: Optional[str] = None
+    prev_floor: Optional[str] = None
+    prev_room_name: Optional[str] = None
 
 
 class StatsResponse(BaseModel):

@@ -90,6 +90,20 @@ export default function ScanResult({ result }) {
         </div>
       )}
 
+      {result.location_changed && (
+        <div className="scan-alert warn">
+          <b>Location updated</b>
+          <p>Department/floor/room for this visit differ from the last one — recorded as a move.</p>
+          <div className="res-diff">
+            <div>
+              <span>Room / Floor / Department</span>
+              <div><i>was</i> {[result.prev_room_name, result.prev_floor, result.prev_department].filter(Boolean).join(' · ') || '—'}</div>
+              <div><i>now</i> {site || '—'}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="scan-card">
         <Row label="Console">{result.console_id} · {result.console_name}</Row>
         <Row label="Site">{result.hospital}, {result.city}</Row>

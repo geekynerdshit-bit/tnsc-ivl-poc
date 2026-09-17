@@ -144,6 +144,45 @@ def submit_scan(scan: ScanRequest):
     logger.info("identity: type=%s status=%s mismatched=%s override=%s",
                 scan_type, identity_status, verdict["mismatched"], manual_override)
 
+    given_department = (scan.department or "").strip() or None
+    given_floor = (scan.floor or "").strip() or None
+    given_room = (scan.room_name or "").strip() or None
+
+    # ---- location-change detection ----------------------------------------
+    # Department/floor/room are pre-filled in the UI from the console's
+    # previous visit, so a submitted value that differs from that previous
+    # visit is a deliberate edit — a real signal the console was physically
+    # moved. Captured here, at write time, as a permanent record of what it
+    # changed FROM, so the dashboard can show it without depending on the
+    # previous scan row still existing.
+    prev_result = (
+        supabase.table("scans")
+        .select("department,floor,room_name")
+        .eq("console_id", scan.console_id)
+        .order("scanned_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    prev_location = prev_result.data[0] if prev_result.data else None
+
+    location_changed = False
+    prev_department = prev_floor = prev_room_name = None
+    if prev_location is not None:
+        location_changed = (
+            prev_location.get("department") != given_department
+            or prev_location.get("floor") != given_floor
+            or prev_location.get("room_name") != given_room
+        )
+        if location_changed:
+            prev_department = prev_location.get("department")
+            prev_floor = prev_location.get("floor")
+            prev_room_name = prev_location.get("room_name")
+            logger.info(
+                "location changed for %s: dept %r->%r, floor %r->%r, room %r->%r",
+                scan.console_id, prev_department, given_department,
+                prev_floor, given_floor, prev_room_name, given_room,
+            )
+
     # Store the photo. A storage failure must not lose the scan — the GPS
     # evidence is the primary record.
     image_url = upload_photo(scan.console_id, scan.image_base64) if scan.image_base64 else None
@@ -168,11 +207,15 @@ def submit_scan(scan: ScanRequest):
         "identity_status": identity_status,
         "manual_override": manual_override,
         "override_reason": (scan.override_reason or "").strip() or None,
-        "department": (scan.department or "").strip() or None,
-        "floor": (scan.floor or "").strip() or None,
-        "room_name": (scan.room_name or "").strip() or None,
+        "department": given_department,
+        "floor": given_floor,
+        "room_name": given_room,
         "engineer_mobile": (scan.engineer_mobile or "").strip() or None,
         "notes": (scan.notes or "").strip() or None,
+        "location_changed": location_changed,
+        "prev_department": prev_department,
+        "prev_floor": prev_floor,
+        "prev_room_name": prev_room_name,
     }).execute()
 
     row = insert_result.data[0]
@@ -236,11 +279,15 @@ def submit_scan(scan: ScanRequest):
         known_serial=known_serial,
         known_mfg_date=known_mfg,
         manual_override=manual_override,
-        department=scan.department,
-        floor=scan.floor,
-        room_name=scan.room_name,
+        department=given_department,
+        floor=given_floor,
+        room_name=given_room,
         engineer_mobile=scan.engineer_mobile,
         notes=scan.notes,
+        location_changed=location_changed,
+        prev_department=prev_department,
+        prev_floor=prev_floor,
+        prev_room_name=prev_room_name,
     )
 
 

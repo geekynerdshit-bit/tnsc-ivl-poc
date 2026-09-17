@@ -63,9 +63,11 @@ uvicorn main:app --reload
 |----------------|--------------------------------------------------------------|
 | DATABASE_URL   | Supabase → Project Settings → Database → URI                 |
 | SUPABASE_URL   | Supabase → Project Settings → API → Project URL              |
-| SUPABASE_KEY   | Supabase → Project Settings → API → anon/public key          |
+| SUPABASE_KEY   | Supabase → Project Settings → API → **service_role** key (secret) |
 
 **Note:** If your DB password contains special characters (e.g. `@`), URL-encode them in DATABASE_URL (`@` → `%40`).
+
+**SUPABASE_KEY must be the service_role key, not anon/public.** The backend is a trusted server that already validates every request before writing to the DB — it should bypass table grants/RLS rather than needing `GRANT` statements added table-by-table as new write paths get built (this bit us once already: `consoles` UPDATE was silently denied for the anon role until the site-registration feature actually exercised it). This key is backend-only — never in `poc-frontend`, never behind a `VITE_` prefix, never committed.
 
 ## Database Schema
 

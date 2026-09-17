@@ -90,14 +90,15 @@ export default function ScanPage() {
     getConsole(tagParam)
       .then((res) => {
         setConsoleData(res.data)
-        // Deliberately NOT pre-filled from the last visit's department/
-        // floor/room. Per-visit capture exists specifically to catch a
-        // console that's been moved to a different room — something the
-        // GPS radius check can't see. Pre-filling last time's values would
-        // hand the engineer an already-"complete"-looking form, making a
-        // stale, unverified room the path of least resistance under time
-        // pressure. The last-known values are still shown as a reference
-        // below, just not copied into the fields the engineer must confirm.
+        // Pre-filled from the last visit — most visits are to the same
+        // room, so this saves retyping. Safe to do because the backend now
+        // flags a real edit away from this pre-fill as a "location changed"
+        // event (see ScanResult's callout and the dashboard) — so a genuine
+        // move is still surfaced explicitly, it just isn't forced through
+        // empty-field friction on every single visit.
+        setDepartment(res.data.current_department || '')
+        setFloor(res.data.current_floor || '')
+        setRoomName(res.data.current_room || '')
       })
       .catch((err) => {
         setConsoleError(

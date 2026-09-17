@@ -143,23 +143,30 @@ export function parseFields(text) {
 
   if (!serial) {
     // Last-resort fallback: scan for a standalone value token near wherever
-    // "SN" appears (even if findNear's stricter label match failed), never
-    // requiring a letter+digit mix — a real serial can be pure digits.
-    // Address/company lines are excluded so a postal code or street number
-    // is never picked up instead.
+    // "SN" appears (even if findNear's stricter label match failed). This
+    // is deliberately anchored — it only runs when "SN" was actually found
+    // somewhere in the OCR text. Guessing with no anchor at all (e.g.
+    // "longest token anywhere on the label") was tried and is unsafe: with
+    // no SN/REF block legible, it confidently returned the brand name
+    // ("SHOCKWAVE") as the serial instead of leaving the field for the
+    // engineer to fill in — a wrong auto-fill is worse than an empty one,
+    // since it can silently corrupt the console's registered identity.
+    // Candidates must contain a digit (a serial can be pure digits, like
+    // "53941", but is never a plain dictionary/brand word), and
+    // address/company lines are excluded so a postal code isn't picked up.
     const snIdx = lines.findIndex((l) => /\bS\s?\/?\s?N\b/i.test(l) && !ADDRESS_LINE.test(l))
-    const searchLines = snIdx >= 0
-      ? lines.slice(snIdx, Math.min(snIdx + 3, lines.length))
-      : lines.filter((l) => !ADDRESS_LINE.test(l))
-
-    for (const line of searchLines) {
-      if (ADDRESS_LINE.test(line)) continue
-      const candidates = (line.toUpperCase().match(VALUE_TOKEN) || [])
-        .filter((c) => !ref || c !== ref.toUpperCase())
-        .filter((c) => !/^(SN|REF|MFG|MFD|EC|LR|CE|MD)$/.test(c))
-      if (candidates.length) {
-        serial = candidates.reduce((a, b) => (b.length > a.length ? b : a))
-        break
+    if (snIdx >= 0) {
+      const searchLines = lines.slice(snIdx, Math.min(snIdx + 3, lines.length))
+      for (const line of searchLines) {
+        if (ADDRESS_LINE.test(line)) continue
+        const candidates = (line.toUpperCase().match(VALUE_TOKEN) || [])
+          .filter((c) => /\d/.test(c))
+          .filter((c) => !ref || c !== ref.toUpperCase())
+          .filter((c) => !/^(SN|REF|MFG|MFD|EC|LR|CE|MD)$/.test(c))
+        if (candidates.length) {
+          serial = candidates.reduce((a, b) => (b.length > a.length ? b : a))
+          break
+        }
       }
     }
   }

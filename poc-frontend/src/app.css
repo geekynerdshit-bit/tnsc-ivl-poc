@@ -299,6 +299,15 @@ button {
   text-align: center; font-size: 20px; letter-spacing: 4px; margin-bottom: 12px;
 }
 
+.gps-warn { margin-top: 6px; font-size: 13.5px; color: var(--warn-ink); }
+
+.coords-toggle { margin-top: 8px; }
+.coords-toggle summary {
+  cursor: pointer; font-size: 13px; font-weight: 600;
+  color: var(--muted); text-decoration: underline;
+}
+.coords-toggle p { margin-top: 6px; }
+
 .ocr-raw { margin-top: 10px; }
 .ocr-raw summary {
   cursor: pointer; font-size: 13.5px; font-weight: 600;

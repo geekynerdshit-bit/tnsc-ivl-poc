@@ -90,11 +90,14 @@ export default function ScanPage() {
     getConsole(tagParam)
       .then((res) => {
         setConsoleData(res.data)
-        // Prefill site detail from the console's last-known location — most
-        // visits are to the same room, so this saves retyping; still editable.
-        setDepartment(res.data.current_department || '')
-        setFloor(res.data.current_floor || '')
-        setRoomName(res.data.current_room || '')
+        // Deliberately NOT pre-filled from the last visit's department/
+        // floor/room. Per-visit capture exists specifically to catch a
+        // console that's been moved to a different room — something the
+        // GPS radius check can't see. Pre-filling last time's values would
+        // hand the engineer an already-"complete"-looking form, making a
+        // stale, unverified room the path of least resistance under time
+        // pressure. The last-known values are still shown as a reference
+        // below, just not copied into the fields the engineer must confirm.
       })
       .catch((err) => {
         setConsoleError(
@@ -210,8 +213,14 @@ export default function ScanPage() {
             <div><span>Serial number</span><b>{consoleData.serial_number}</b></div>
             {consoleData.ref_number && <div><span>REF</span><b>{consoleData.ref_number}</b></div>}
             {consoleData.mfg_date && <div><span>Mfg date</span><b>{consoleData.mfg_date}</b></div>}
-            {consoleData.current_room && (
-              <div><span>Last known room</span><b>{consoleData.current_room}</b></div>
+            {(consoleData.current_department || consoleData.current_floor || consoleData.current_room) && (
+              <div>
+                <span>Last recorded at</span>
+                <b>
+                  {[consoleData.current_department, consoleData.current_floor, consoleData.current_room]
+                    .filter(Boolean).join(' · ')}
+                </b>
+              </div>
             )}
           </div>
         ) : (
@@ -233,10 +242,20 @@ export default function ScanPage() {
         </div>
         {gpsState === 'pending' && <p className="step-body muted">Capturing your location...</p>}
         {gpsState === 'ok' && (
-          <p className="step-body mono-sm">
-            {gps.lat.toFixed(5)}, {gps.lng.toFixed(5)}
-            {gps.accuracy ? ` · ±${Math.round(gps.accuracy)} m` : ''}
-          </p>
+          <div className="step-body">
+            <p>
+              Location captured{gps.accuracy ? ` — accurate to within ${Math.round(gps.accuracy)} m` : ''}.
+            </p>
+            {gps.accuracy > 150 && (
+              <p className="gps-warn">
+                That's a rough fix. For a tighter reading, stand closer to a window or step outside, then retake the visit.
+              </p>
+            )}
+            <details className="coords-toggle">
+              <summary>Show coordinates</summary>
+              <p className="mono-sm">{gps.lat.toFixed(5)}, {gps.lng.toFixed(5)}</p>
+            </details>
+          </div>
         )}
         {gpsState === 'denied' && (
           <div className="scan-alert warn">

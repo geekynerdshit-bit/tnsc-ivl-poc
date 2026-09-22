@@ -42,9 +42,10 @@ class ScanRequest(BaseModel):
     scanned_by: Optional[str] = None
     device_info: Optional[str] = None
 
-    # Site detail — required only on this console's first scan, when the
-    # hospital/GPS point isn't on file yet. Becomes the console's permanent
-    # site record; not asked again on later visits.
+    # Hospital name is re-entered on EVERY visit (a real signal independent
+    # of GPS that the console relocated). City/pincode are asked only on
+    # the console's first scan, when there's no site on file yet — they
+    # become part of its permanent record and aren't re-asked after.
     hospital: Optional[str] = None
     city: Optional[str] = None
     pincode: Optional[str] = None
@@ -93,6 +94,14 @@ class ScanResponse(BaseModel):
     known_mfg_date: Optional[str] = None
     manual_override: bool = False
 
+    # Hospital name entered this visit vs. what's on file — same
+    # never-auto-overwrite rule as identity: a mismatch is flagged, not
+    # silently applied. known_hospital is what the record held before this
+    # scan (response-only, not persisted — same pattern as known_serial).
+    given_hospital: Optional[str] = None
+    known_hospital: Optional[str] = None
+    hospital_mismatch: bool = False
+
     department: Optional[str] = None
     floor: Optional[str] = None
     room_name: Optional[str] = None
@@ -131,6 +140,9 @@ class ScanListItem(BaseModel):
     given_mfg_date: Optional[str] = None
     manual_override: Optional[bool] = False
 
+    given_hospital: Optional[str] = None
+    hospital_mismatch: bool = False
+
     department: Optional[str] = None
     floor: Optional[str] = None
     room_name: Optional[str] = None
@@ -141,6 +153,19 @@ class ScanListItem(BaseModel):
     prev_department: Optional[str] = None
     prev_floor: Optional[str] = None
     prev_room_name: Optional[str] = None
+
+
+class SiteUpdateRequest(BaseModel):
+    """Admin-only: re-register a console's approved site. Passcode-gated —
+    see ADMIN_PASSCODE in config.py — because this backend has no auth of
+    its own otherwise, and this is the one action that can override a
+    hospital/site the system deliberately never touches automatically."""
+    passcode: str
+    hospital: str
+    city: str
+    pincode: Optional[str] = None
+    approved_lat: Optional[float] = None
+    approved_lng: Optional[float] = None
 
 
 class StatsResponse(BaseModel):

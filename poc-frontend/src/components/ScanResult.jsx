@@ -90,6 +90,20 @@ export default function ScanResult({ result }) {
         </div>
       )}
 
+      {result.hospital_mismatch && (
+        <div className="scan-alert danger">
+          <b>Hospital does not match</b>
+          <p>Flagged for review. The record was NOT overwritten — an admin can confirm a real relocation from the dashboard.</p>
+          <div className="res-diff">
+            <div>
+              <span>Hospital</span>
+              <div><i>on record</i> {result.known_hospital || '—'}</div>
+              <div><i>entered</i> {result.given_hospital || '—'}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {result.location_changed && (
         <div className="scan-alert warn">
           <b>Location updated</b>

@@ -3,7 +3,7 @@ from database import get_supabase
 from schemas import ScanRequest, ScanResponse, ScanListItem, StatsResponse
 from utils.geo import calculate_distance, get_geo_status
 from utils.storage import upload_photo
-from utils.identity import compare, REGISTERED
+from utils.identity import compare, canonical, REGISTERED
 from log_config import get_logger
 from datetime import date, datetime, timedelta, timezone
 from typing import List, Optional
@@ -42,6 +42,7 @@ def normalize_timestamp(value):
 # frontend, so the API rejects an incomplete visit regardless of caller (a
 # future mobile app, a direct API call, a stale frontend build).
 _REQUIRED_FIELDS = [
+    ("hospital", "hospital name"),
     ("department", "department"),
     ("floor", "floor"),
     ("scanned_by", "engineer name"),
@@ -49,9 +50,11 @@ _REQUIRED_FIELDS = [
 ]
 
 # Only asked once per console — on the first scan, when no site is on file
-# yet. Not required on later visits, since the site is fixed once set.
+# yet. Not required on later visits, since city/pincode are fixed once set.
+# Hospital name, unlike these, is re-asked on every visit — see
+# _REQUIRED_FIELDS above — because it's the one piece of site detail that
+# can genuinely change (a relocation to a different hospital entirely).
 _SITE_REQUIRED_FIELDS = [
-    ("hospital", "hospital name"),
     ("city", "city"),
 ]
 
@@ -83,6 +86,22 @@ def submit_scan(scan: ScanRequest):
 
     _require_fields(scan, is_site_registered)
 
+    # ---- hospital verification ---------------------------------------------
+    # Hospital name is re-entered every visit (unlike city/pincode, which are
+    # only asked once). On the first scan there's nothing to compare against
+    # yet — it simply becomes the record. On every later scan, a name that
+    # doesn't match is flagged, same "never silently overwrite" rule as
+    # identity: only the admin-only PATCH /api/consoles/{id}/site endpoint
+    # can actually re-register a console's hospital.
+    known_hospital = console.get("hospital")
+    given_hospital = (scan.hospital or "").strip() or None
+    hospital_mismatch = bool(
+        is_site_registered and given_hospital and canonical(given_hospital) != canonical(known_hospital)
+    )
+    if hospital_mismatch:
+        logger.info("hospital mismatch for %s: on record=%r, entered=%r",
+                     scan.console_id, known_hospital, given_hospital)
+
     # Calculate distance against the approved point, or — if this console has
     # no approved point yet (first scan, or an earlier scan that lost GPS
     # before one could be set) — this scan's GPS becomes that point.
@@ -108,6 +127,13 @@ def submit_scan(scan: ScanRequest):
         geo_status = "NO_GPS"
         logger.info("geo check: no GPS coordinates and no approved point on file — status=NO_GPS")
 
+    # A hospital-name mismatch overrides whatever GPS concluded — the console
+    # is reporting itself somewhere it isn't supposed to be, and a coincidental
+    # GPS pass (two hospitals near each other, GPS drift) must not mask that.
+    if hospital_mismatch and geo_status == "VERIFIED":
+        geo_status = "OUTSIDE_ZONE"
+        logger.info("geo status overridden to OUTSIDE_ZONE by hospital mismatch")
+
     # ---- identity: pre-seeded on the console record by an admin, not      --
     # ---- captured from the engineer (photo/OCR capture is shelved for now)--
     known_serial = console.get("serial_number")
@@ -124,11 +150,13 @@ def submit_scan(scan: ScanRequest):
     identity_status = verdict["status"]
     scan_type = "REGISTRATION" if verdict["is_registration"] else "VERIFICATION"
 
-    if verdict["mismatched"] and not (scan.override_reason or "").strip():
-        raise HTTPException(
-            status_code=400,
-            detail="Identity does not match the record — a mismatch explanation is required.",
+    if (verdict["mismatched"] or hospital_mismatch) and not (scan.override_reason or "").strip():
+        detail = (
+            "Hospital does not match the record — a mismatch explanation is required."
+            if hospital_mismatch and not verdict["mismatched"]
+            else "Identity does not match the record — a mismatch explanation is required."
         )
+        raise HTTPException(status_code=400, detail=detail)
 
     # An engineer submitting values that differ from what OCR read is an
     # explicit manual correction. Only meaningful when OCR actually ran —
@@ -206,6 +234,8 @@ def submit_scan(scan: ScanRequest):
         "identity_status": identity_status,
         "manual_override": manual_override,
         "override_reason": (scan.override_reason or "").strip() or None,
+        "given_hospital": given_hospital,
+        "hospital_mismatch": hospital_mismatch,
         "department": given_department,
         "floor": given_floor,
         "room_name": given_room,
@@ -242,7 +272,7 @@ def submit_scan(scan: ScanRequest):
     resolved_hospital = console.get("hospital")
     resolved_city = console.get("city")
     if not is_site_registered:
-        resolved_hospital = (scan.hospital or "").strip()
+        resolved_hospital = given_hospital or ""
         resolved_city = (scan.city or "").strip()
         console_update.update({
             "hospital": resolved_hospital,
@@ -278,6 +308,9 @@ def submit_scan(scan: ScanRequest):
         known_serial=known_serial,
         known_mfg_date=known_mfg,
         manual_override=manual_override,
+        given_hospital=given_hospital,
+        known_hospital=known_hospital,
+        hospital_mismatch=hospital_mismatch,
         department=given_department,
         floor=given_floor,
         room_name=given_room,

@@ -9,14 +9,21 @@ import ScanResult from '../components/ScanResult'
  *   1. GPS is captured IMMEDIATELY on tap, before anything else and before the
  *      engineer can interact with the form. Location must reflect where the tag
  *      was actually tapped, not where the phone ended up minutes later.
- *   2. Register site — ONLY on this console's first scan, when no hospital/
- *      GPS point is on file yet: hospital, city, pincode. This becomes the
- *      console's permanent site record and this scan's GPS becomes its
- *      approved point; neither is asked again on later visits.
+ *   2. Hospital — re-entered on EVERY visit, pre-filled from the record once
+ *      it's set. A name that doesn't match what's on file is a real signal
+ *      the console relocated to a different hospital entirely (independent
+ *      of GPS, which alone can't always catch it); city/pincode are only
+ *      asked once, on the first scan, and become permanent from there.
  *   3. Site detail — department and floor are captured fresh on EVERY
  *      visit (a console can move within the same hospital, which the
  *      GPS geo-fence can't see).
  *   4. Engineer detail, then submit.
+ *
+ *   A hospital mismatch never silently overwrites the console's approved
+ *   site — same rule as identity. It's flagged (forcing geo_status to
+ *   OUTSIDE_ZONE regardless of GPS) and requires an explanation; an admin
+ *   then has to explicitly confirm the relocation from the dashboard
+ *   (PATCH /api/consoles/{id}/site) before it becomes the new record.
  *
  *   Every field is mandatory except notes — this is the audit record for a
  *   real medical asset, so a partial visit is not accepted. GPS is the one
@@ -43,10 +50,11 @@ export default function ScanPage() {
   const [gpsState, setGpsState] = useState('pending')  // pending | ok | denied
   const gpsStartedRef = useRef(false)
 
-  // Site registration — only collected on this console's first scan
+  // Hospital — re-entered every visit; city/pincode only on the first
   const [hospital, setHospital] = useState('')
   const [city, setCity] = useState('')
   const [pincode, setPincode] = useState('')
+  const [overrideReason, setOverrideReason] = useState('')
 
   // Site + engineer detail
   const [department, setDepartment] = useState('')
@@ -95,6 +103,7 @@ export default function ScanPage() {
         // event (see ScanResult's callout and the dashboard) — so a genuine
         // move is still surfaced explicitly, it just isn't forced through
         // empty-field friction on every single visit.
+        setHospital(res.data.hospital || '')
         setDepartment(res.data.current_department || '')
         setFloor(res.data.current_floor || '')
       })
@@ -111,18 +120,24 @@ export default function ScanPage() {
   const isRegistered = Boolean(consoleData?.is_registered)
   const isSiteRegistered = Boolean(consoleData?.is_site_registered)
 
+  // Live mismatch preview against the stored record (server re-checks on
+  // submit) — same canonicalization the backend uses: alphanumerics only,
+  // so punctuation/case differences never count as a "different" hospital.
+  const norm = (v) => (v || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+  const hospitalMismatch =
+    isSiteRegistered && hospital.trim() && norm(hospital) !== norm(consoleData?.hospital)
+
   // Every field is mandatory except notes — this is the audit record, so a
   // partial visit isn't acceptable. Single source of truth for both the
   // submit-button gate and the "still needed" hint below.
   const missing = []
-  if (!isSiteRegistered) {
-    if (!hospital.trim()) missing.push('hospital name')
-    if (!city.trim()) missing.push('city')
-  }
+  if (!hospital.trim()) missing.push('hospital name')
+  if (!isSiteRegistered && !city.trim()) missing.push('city')
   if (!department.trim()) missing.push('department')
   if (!floor.trim()) missing.push('floor')
   if (!userName.trim()) missing.push('engineer name')
   if (!userMobile.trim()) missing.push('mobile number')
+  if (hospitalMismatch && !overrideReason.trim()) missing.push('mismatch explanation')
 
   const canSubmit = missing.length === 0 && !submitting
 
@@ -136,9 +151,10 @@ export default function ScanPage() {
         scanned_lng: gps.lng,
         scanned_by: userName.trim() || null,
         device_info: navigator.userAgent,
-        hospital: !isSiteRegistered ? hospital.trim() || null : null,
+        hospital: hospital.trim() || null,
         city: !isSiteRegistered ? city.trim() || null : null,
         pincode: !isSiteRegistered ? pincode.trim() || null : null,
+        override_reason: overrideReason.trim() || null,
         department: department.trim() || null,
         floor: floor.trim() || null,
         engineer_mobile: userMobile.trim() || null,
@@ -261,24 +277,29 @@ export default function ScanPage() {
         )}
       </div>
 
-      {/* Step 2 — register the site (only if not already on file) */}
-      {!isSiteRegistered && (
-        <div className="step">
-          <div className="step-head">
-            <span className="step-num">2</span>
-            <span className="step-title">Register site</span>
-          </div>
-          <div className="step-body">
+      {/* Step 2 — hospital, re-entered every visit */}
+      <div className="step">
+        <div className="step-head">
+          <span className="step-num">2</span>
+          <span className="step-title">Hospital</span>
+        </div>
+        <div className="step-body">
+          {!isSiteRegistered && (
             <div className="scan-alert warn">
               No hospital is on file for this console yet. This will become
               its permanent site record, and your current location the
               approved point for future visits.
             </div>
-            <label className="field">
-              <span>Hospital name <em className="req">*</em></span>
-              <input value={hospital} onChange={(e) => setHospital(e.target.value)}
-                     placeholder="e.g. Apollo Hospital Indraprastha" />
-            </label>
+          )}
+          <label className="field">
+            <span>Hospital name <em className="req">*</em></span>
+            <input value={hospital} onChange={(e) => setHospital(e.target.value)}
+                   placeholder="e.g. Apollo Hospital Indraprastha" />
+            {hospitalMismatch && (
+              <em className="field-err">Does not match the record ({consoleData.hospital})</em>
+            )}
+          </label>
+          {!isSiteRegistered && (
             <div className="field-row">
               <label className="field">
                 <span>City <em className="req">*</em></span>
@@ -289,14 +310,31 @@ export default function ScanPage() {
                 <input value={pincode} onChange={(e) => setPincode(e.target.value)} placeholder="e.g. 110076" />
               </label>
             </div>
-          </div>
+          )}
+          {hospitalMismatch && (
+            <div className="scan-alert danger">
+              <b>Hospital does not match this tag's record.</b>
+              <p>
+                This console is on file at "{consoleData.hospital}". Explain
+                below if it's genuinely relocated here or if this was a
+                mistake — the master record is never changed automatically;
+                an admin must confirm it from the dashboard.
+              </p>
+              <textarea
+                value={overrideReason}
+                onChange={(e) => setOverrideReason(e.target.value)}
+                placeholder="e.g. Console physically moved to this hospital on 20 Sept"
+                rows={3}
+              />
+            </div>
+          )}
         </div>
-      )}
+      </div>
 
       {/* Step 3 — site detail for this visit */}
       <div className="step">
         <div className="step-head">
-          <span className="step-num">{isSiteRegistered ? 2 : 3}</span>
+          <span className="step-num">3</span>
           <span className="step-title">Site detail</span>
         </div>
         <div className="step-body">
@@ -315,7 +353,7 @@ export default function ScanPage() {
       {/* Step 4 — who is recording it */}
       <div className="step">
         <div className="step-head">
-          <span className="step-num">{isSiteRegistered ? 3 : 4}</span>
+          <span className="step-num">4</span>
           <span className="step-title">Service engineer</span>
         </div>
         <div className="step-body">

@@ -54,7 +54,7 @@ export default function ScanResult({ result }) {
   const ident = showIdentityAlert ? IDENTITY[result.identity_status] : null
   const mismatched = result.mismatched_fields || []
 
-  const site = [result.room_name, result.floor, result.department].filter(Boolean).join(' · ')
+  const site = [result.department, result.floor].filter(Boolean).join(' · ')
 
   return (
     <div className="scan-wrap">
@@ -93,11 +93,11 @@ export default function ScanResult({ result }) {
       {result.location_changed && (
         <div className="scan-alert warn">
           <b>Location updated</b>
-          <p>Department/floor/room for this visit differ from the last one — recorded as a move.</p>
+          <p>Department/floor for this visit differ from the last one — recorded as a move.</p>
           <div className="res-diff">
             <div>
-              <span>Room / Floor / Department</span>
-              <div><i>was</i> {[result.prev_room_name, result.prev_floor, result.prev_department].filter(Boolean).join(' · ') || '—'}</div>
+              <span>Floor / Department</span>
+              <div><i>was</i> {[result.prev_department, result.prev_floor].filter(Boolean).join(' · ') || '—'}</div>
               <div><i>now</i> {site || '—'}</div>
             </div>
           </div>
@@ -107,7 +107,7 @@ export default function ScanResult({ result }) {
       <div className="scan-card">
         <Row label="Console">{result.console_id} · {result.console_name}</Row>
         <Row label="Site">{result.hospital}, {result.city}</Row>
-        {site && <Row label="Room / Floor">{site}</Row>}
+        {site && <Row label="Floor / Department">{site}</Row>}
         {result.given_serial && <Row label="Serial">{result.given_serial}</Row>}
         {result.given_mfg_date && <Row label="Mfg date">{result.given_mfg_date}</Row>}
         {result.scanned_lat != null && (

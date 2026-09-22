@@ -13,9 +13,9 @@ import ScanResult from '../components/ScanResult'
  *      GPS point is on file yet: hospital, city, pincode. This becomes the
  *      console's permanent site record and this scan's GPS becomes its
  *      approved point; neither is asked again on later visits.
- *   3. Site detail — department, floor and room are captured fresh on
- *      EVERY visit (a console can move rooms within the same hospital,
- *      which the GPS geo-fence can't see).
+ *   3. Site detail — department and floor are captured fresh on EVERY
+ *      visit (a console can move within the same hospital, which the
+ *      GPS geo-fence can't see).
  *   4. Engineer detail, then submit.
  *
  *   Every field is mandatory except notes — this is the audit record for a
@@ -51,7 +51,6 @@ export default function ScanPage() {
   // Site + engineer detail
   const [department, setDepartment] = useState('')
   const [floor, setFloor] = useState('')
-  const [roomName, setRoomName] = useState('')
   const [userName, setUserName] = useState('')
   const [userMobile, setUserMobile] = useState('')
   const [notes, setNotes] = useState('')
@@ -98,7 +97,6 @@ export default function ScanPage() {
         // empty-field friction on every single visit.
         setDepartment(res.data.current_department || '')
         setFloor(res.data.current_floor || '')
-        setRoomName(res.data.current_room || '')
       })
       .catch((err) => {
         setConsoleError(
@@ -123,7 +121,6 @@ export default function ScanPage() {
   }
   if (!department.trim()) missing.push('department')
   if (!floor.trim()) missing.push('floor')
-  if (!roomName.trim()) missing.push('room')
   if (!userName.trim()) missing.push('engineer name')
   if (!userMobile.trim()) missing.push('mobile number')
 
@@ -144,7 +141,6 @@ export default function ScanPage() {
         pincode: !isSiteRegistered ? pincode.trim() || null : null,
         department: department.trim() || null,
         floor: floor.trim() || null,
-        room_name: roomName.trim() || null,
         engineer_mobile: userMobile.trim() || null,
         notes: notes.trim() || null,
       })
@@ -214,11 +210,11 @@ export default function ScanPage() {
             <div><span>Serial number</span><b>{consoleData.serial_number}</b></div>
             {consoleData.ref_number && <div><span>REF</span><b>{consoleData.ref_number}</b></div>}
             {consoleData.mfg_date && <div><span>Mfg date</span><b>{consoleData.mfg_date}</b></div>}
-            {(consoleData.current_department || consoleData.current_floor || consoleData.current_room) && (
+            {(consoleData.current_department || consoleData.current_floor) && (
               <div>
                 <span>Last recorded at</span>
                 <b>
-                  {[consoleData.current_department, consoleData.current_floor, consoleData.current_room]
+                  {[consoleData.current_department, consoleData.current_floor]
                     .filter(Boolean).join(' · ')}
                 </b>
               </div>
@@ -309,16 +305,10 @@ export default function ScanPage() {
             <input value={department} onChange={(e) => setDepartment(e.target.value)}
                    placeholder="e.g. Cath Lab, Cardiology, ICU" />
           </label>
-          <div className="field-row">
-            <label className="field">
-              <span>Floor <em className="req">*</em></span>
-              <input value={floor} onChange={(e) => setFloor(e.target.value)} placeholder="e.g. 2nd Floor" />
-            </label>
-            <label className="field">
-              <span>Room <em className="req">*</em></span>
-              <input value={roomName} onChange={(e) => setRoomName(e.target.value)} placeholder="e.g. Cath Lab 2" />
-            </label>
-          </div>
+          <label className="field">
+            <span>Floor <em className="req">*</em></span>
+            <input value={floor} onChange={(e) => setFloor(e.target.value)} placeholder="e.g. 2nd Floor" />
+          </label>
         </div>
       </div>
 

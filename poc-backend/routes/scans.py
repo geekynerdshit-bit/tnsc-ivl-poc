@@ -44,7 +44,6 @@ def normalize_timestamp(value):
 _REQUIRED_FIELDS = [
     ("department", "department"),
     ("floor", "floor"),
-    ("room_name", "room"),
     ("scanned_by", "engineer name"),
     ("engineer_mobile", "mobile number"),
 ]

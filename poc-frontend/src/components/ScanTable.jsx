@@ -115,10 +115,10 @@ export default function ScanTable() {
                   </td>
                   <td style={tdStyle}>{scan.city || '—'}</td>
                   <td style={tdStyle}>
-                    {scan.room_name || scan.department || '—'}
+                    {[scan.department, scan.floor].filter(Boolean).join(' · ') || '—'}
                     {scan.location_changed && (
                       <span
-                        title={`Moved from: ${[scan.prev_room_name, scan.prev_floor, scan.prev_department].filter(Boolean).join(' · ') || '—'}`}
+                        title={`Moved from: ${[scan.prev_department, scan.prev_floor].filter(Boolean).join(' · ') || '—'}`}
                         style={{
                           marginLeft: 6, display: 'inline-block', padding: '1px 6px', borderRadius: '10px',
                           background: '#FFFBEB', color: '#92400E', border: '1px solid #f59e0b',

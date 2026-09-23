@@ -2,8 +2,16 @@ import React, { useState, useEffect, useRef } from 'react'
 import { getConsole, submitScan } from '../api/client'
 import LoadingSpinner from '../components/LoadingSpinner'
 import ScanResult from '../components/ScanResult'
+import ConsolePicker from '../components/ConsolePicker'
 
 /**
+ * Entry points: an NFC tap or a printed QR code both land here with
+ * ?tag=<console_id> already set. The bare URL with no ?tag= (shareable over
+ * WhatsApp/SMS to anyone, NFC-capable phone or not) shows ConsolePicker
+ * instead — pick the console by its printed serial, and it sets ?tag= and
+ * continues into this exact same flow. Nothing past that point knows or
+ * cares which entry point was used.
+ *
  * Field workflow, in the order required:
  *
  *   1. GPS is captured IMMEDIATELY on tap, before anything else and before the
@@ -175,16 +183,11 @@ export default function ScanPage() {
   // ---- render states -----------------------------------------------------
   if (tag === null || consoleLoading) return <LoadingSpinner message="Loading console..." />
 
+  // No ?tag= at all — either no NFC on this phone, or the tap didn't work.
+  // This is also what the bare /scan URL shows when shared directly (e.g.
+  // over WhatsApp) as a no-NFC fallback: pick the console instead of tapping.
   if (tag === '') {
-    return (
-      <div className="scan-wrap">
-        <div className="scan-card center">
-          <h2>No console tag detected</h2>
-          <p>Tap an NFC tag on a console to begin.</p>
-          <p className="hint">Testing? Add <code>?tag=IVL-001</code> to the URL.</p>
-        </div>
-      </div>
-    )
+    return <ConsolePicker />
   }
 
   if (consoleError) {
